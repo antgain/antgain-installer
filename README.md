@@ -6,12 +6,12 @@ One-line installation scripts for AntGain Desktop and CLI.
 
 **Auto-install latest version:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-linux.sh | sudo bash
+curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
 ```
 
 **Install specific version:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-linux.sh | sudo bash -s 1.0.23
+curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.25
 ```
 
 ### What it does
@@ -28,42 +28,42 @@ curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/inst
 
 **Auto-install latest CLI version:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli.sh | bash
+curl -fsSL https://install.antgain.app/install-cli.sh | bash
 ```
 
 **Install specific CLI version:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli.sh | bash -s 1.0.24
+curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.25
 ```
 
 ### DEB Package Install (Debian/Ubuntu)
 
 **Auto-install latest CLI version:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-deb.sh | sudo bash
+curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash
 ```
 
 **Install specific CLI version:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-deb.sh | sudo bash -s 1.0.24
+curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.25
 ```
 
 ### Install as Systemd Service
 
 **One-line with API Key argument:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-service.sh | sudo bash -s YOUR_API_KEY
+curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash -s YOUR_API_KEY
 ```
 
 **With environment variable:**
 ```bash
 export ANTGAIN_API_KEY=your-api-key
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-service.sh | sudo bash
+curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
 ```
 
 **Interactive (will prompt for API Key):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-service.sh | sudo bash
+curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
 ```
 
 ### What CLI installer does
@@ -78,14 +78,14 @@ curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/inst
 
 ### Desktop
 ```bash
-wget https://github.com/proxy-peer/antgain/releases/latest/download/AntGain_*_linux-x86_64.deb
+wget https://github.com/antgain/antgain/releases/latest/download/AntGain_*_linux-x86_64.deb
 sudo apt install ./AntGain_*_linux-x86_64.deb
 ```
 
 ### CLI (Universal Binary)
 ```bash
 # Linux x86_64
-wget https://pub-a6321dc4515447b698de8db2567150ff.r2.dev/cli/releases/1.0.24/antgain-linux-amd64.tar.gz
+wget https://pub-a6321dc4515447b698de8db2567150ff.r2.dev/cli/releases/1.0.25/antgain-linux-amd64.tar.gz
 tar xzf antgain-linux-amd64.tar.gz
 sudo mv antgain /usr/local/bin/
 ```
@@ -93,8 +93,8 @@ sudo mv antgain /usr/local/bin/
 ### CLI (DEB Package)
 ```bash
 # Debian/Ubuntu x86_64
-wget https://pub-a6321dc4515447b698de8db2567150ff.r2.dev/cli/releases/1.0.24/antgain-cli_1.0.24-1_amd64.deb
-sudo apt install ./antgain-cli_1.0.24-1_amd64.deb
+wget https://pub-a6321dc4515447b698de8db2567150ff.r2.dev/cli/releases/1.0.25/antgain-cli_1.0.25-1_amd64.deb
+sudo apt install ./antgain-cli_1.0.25-1_amd64.deb
 ```
 
 ## Requirements

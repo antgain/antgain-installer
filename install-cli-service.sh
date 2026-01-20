@@ -47,7 +47,7 @@ if ! command -v antgain &> /dev/null; then
     print_error "antgain is not installed"
     echo ""
     echo "Install it first:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli.sh | bash"
+    echo "  curl -fsSL https://install.antgain.app/install-cli.sh | bash"
     exit 1
 fi
 

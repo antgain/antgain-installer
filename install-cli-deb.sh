@@ -4,8 +4,8 @@ set -e
 # AntGain CLI DEB Installation Script
 # CLI command line tool installation for Debian/Ubuntu systems (via deb package)
 # Usage: 
-#   curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-deb.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-deb.sh | sudo bash -s 1.0.24
+#   curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash
+#   curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.25
 
 echo "🚀 AntGain CLI DEB Installer"
 echo "================================"
@@ -49,7 +49,7 @@ if ! command -v apt-get &> /dev/null; then
     echo "❌ Error: Only Debian/Ubuntu apt-based systems are supported"
     echo ""
     echo "If you are using another Linux distribution, please use the universal installation script:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli.sh | bash"
+    echo "  curl -fsSL https://install.antgain.app/install-cli.sh | bash"
     exit 1
 fi
 
@@ -67,7 +67,7 @@ else
         echo "❌ Unable to fetch latest version information"
         echo ""
         echo "You can manually specify a version to bypass the version check:"
-        echo "  curl -fsSL ... | sudo bash -s 1.0.24"
+        echo "  curl -fsSL ... | sudo bash -s 1.0.25"
         echo ""
         echo "Or check your network connection and try again."
         exit 1
@@ -97,7 +97,7 @@ if ! curl -fL -o "$TMP_DEB" "$DEB_URL"; then
     echo "❌ Download failed"
     echo ""
     echo "Please check if the version is correct, or try the universal installation script:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli.sh | bash"
+    echo "  curl -fsSL https://install.antgain.app/install-cli.sh | bash"
     exit 1
 fi
 
@@ -133,4 +133,4 @@ echo ""
 echo "Get API Key: https://antgain.app/dashboard/settings"
 echo ""
 echo "Run as system service:"
-echo "  curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-service.sh | sudo bash"
+echo "  curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash"

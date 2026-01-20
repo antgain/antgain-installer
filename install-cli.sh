@@ -77,7 +77,7 @@ elif [ -z "$VERSION" ]; then
         echo "❌ Failed to fetch version info"
         echo ""
         echo "You can install manually from:"
-        echo "  https://github.com/proxy-peer/antgain/releases"
+        echo "  https://github.com/antgain/antgain/releases"
         exit 1
     fi
     
@@ -158,7 +158,7 @@ echo ""
 if [ -n "$API_KEY" ]; then
     echo "🔑 API Key detected. Setting up systemd service..."
     # URL for service installer
-    SERVICE_INSTALLER_URL="https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-service.sh"
+    SERVICE_INSTALLER_URL="https://install.antgain.app/install-cli-service.sh"
     
     echo "📥 Fetching service installer..."
     if [ "$EUID" -ne 0 ]; then
@@ -173,5 +173,5 @@ else
     echo "Get your API key from: https://antgain.app/dashboard/settings"
     echo ""
     echo "Run as systemd service:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/main/install-cli-service.sh | sudo bash -s YOUR_API_KEY"
+    echo "  curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash -s YOUR_API_KEY"
 fi
