@@ -11,7 +11,7 @@ curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
 
 **Install specific version:**
 ```bash
-curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.25
+curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.26
 ```
 
 ### What it does
@@ -33,7 +33,7 @@ curl -fsSL https://install.antgain.app/install-cli.sh | bash
 
 **Install specific CLI version:**
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.25
+curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.26
 ```
 
 ### DEB Package Install (Debian/Ubuntu)
@@ -45,7 +45,7 @@ curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash
 
 **Install specific CLI version:**
 ```bash
-curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.25
+curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.26
 ```
 
 ### Install as Systemd Service
@@ -73,29 +73,6 @@ curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
 - ✅ Downloads appropriate binary
 - ✅ Installs to /usr/local/bin
 - ✅ Makes executable
-
-## Manual Installation
-
-### Desktop
-```bash
-wget https://github.com/antgain/antgain/releases/latest/download/AntGain_*_linux-x86_64.deb
-sudo apt install ./AntGain_*_linux-x86_64.deb
-```
-
-### CLI (Universal Binary)
-```bash
-# Linux x86_64
-wget https://pub-a6321dc4515447b698de8db2567150ff.r2.dev/cli/releases/1.0.25/antgain-linux-amd64.tar.gz
-tar xzf antgain-linux-amd64.tar.gz
-sudo mv antgain /usr/local/bin/
-```
-
-### CLI (DEB Package)
-```bash
-# Debian/Ubuntu x86_64
-wget https://pub-a6321dc4515447b698de8db2567150ff.r2.dev/cli/releases/1.0.25/antgain-cli_1.0.25-1_amd64.deb
-sudo apt install ./antgain-cli_1.0.25-1_amd64.deb
-```
 
 ## Requirements
 

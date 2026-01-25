@@ -1,0 +1,19 @@
+name: Repo Sync
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to target
+        run: |
+          git remote add target https://github.com/proxy-peer/antgain-installer.git
+          git push target main --force

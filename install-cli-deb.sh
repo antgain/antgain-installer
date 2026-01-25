@@ -5,7 +5,7 @@ set -e
 # CLI command line tool installation for Debian/Ubuntu systems (via deb package)
 # Usage: 
 #   curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash
-#   curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.25
+#   curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.26
 
 echo "🚀 AntGain CLI DEB Installer"
 echo "================================"
@@ -67,7 +67,7 @@ else
         echo "❌ Unable to fetch latest version information"
         echo ""
         echo "You can manually specify a version to bypass the version check:"
-        echo "  curl -fsSL ... | sudo bash -s 1.0.25"
+        echo "  curl -fsSL ... | sudo bash -s 1.0.26"
         echo ""
         echo "Or check your network connection and try again."
         exit 1
