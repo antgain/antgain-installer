@@ -4,8 +4,8 @@ set -e
 # AntGain Linux Installation Script
 # Usage: 
 #   curl -fsSL https://... | sudo bash
-#   curl -fsSL https://... | sudo bash -s 1.0.23
-#   curl -fsSL https://... | sudo VERSION=1.0.23 bash
+#   curl -fsSL https://... | sudo bash -s 1.0.30
+#   curl -fsSL https://... | sudo VERSION=1.0.30 bash
 
 echo "🚀 AntGain Linux Installer"
 echo "================================"
@@ -48,7 +48,7 @@ else
         echo "❌ Unable to fetch latest version from R2"
         echo ""
         echo "You can specify version manually to bypass version check:"
-        echo "  curl -fsSL ... | sudo bash -s 1.0.23"
+        echo "  curl -fsSL ... | sudo bash -s 1.0.30"
         echo ""
         echo "Or check network connection and try again."
         exit 1
