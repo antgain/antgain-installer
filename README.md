@@ -11,7 +11,7 @@ curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
 
 **Install specific version:**
 ```bash
-curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.26
+curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.29
 ```
 
 ### What it does
@@ -33,7 +33,7 @@ curl -fsSL https://install.antgain.app/install-cli.sh | bash
 
 **Install specific CLI version:**
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.26
+curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.29
 ```
 
 ### DEB Package Install (Debian/Ubuntu)
@@ -45,7 +45,7 @@ curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash
 
 **Install specific CLI version:**
 ```bash
-curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.26
+curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.29
 ```
 
 ### Install as Systemd Service
@@ -65,6 +65,17 @@ curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
 ```bash
 curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
 ```
+
+### Docker Installation
+
+You can also run AntGain CLI using Docker.
+
+**Quick Start:**
+```bash
+docker run -d --name antgain --restart always -e ANTGAIN_API_KEY=YOUR_API_KEY pinors/antgain-cli:latest
+```
+
+Docker Hub: [pinors/antgain-cli](https://hub.docker.com/r/pinors/antgain-cli)
 
 ### What CLI installer does
 
