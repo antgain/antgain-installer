@@ -25,6 +25,11 @@ ag_should_start_service() {
   ag_env_truthy "${ANTGAIN_AUTO_START:-true}"
 }
 
+# Register boot-time start (default on when a service is installed).
+ag_should_enable_on_boot() {
+  ! ag_env_truthy "${ANTGAIN_NO_BOOT:-}"
+}
+
 ag_log() { echo "$@" >&2; }
 ag_print_error() { echo -e "\033[0;31m❌ $*\033[0m" >&2; }
 ag_print_success() { echo -e "\033[0;32m✅ $*\033[0m" >&2; }
@@ -485,7 +490,21 @@ ag_print_linux_manual_start_hints() {
   ag_log "Or use the installed helper:"
   ag_log "  sudo ${ANTGAIN_LINUX_START_SCRIPT} start"
   ag_log "  sudo ${ANTGAIN_LINUX_START_SCRIPT} stop"
-  ag_log "Boot (cron):  (crontab -l 2>/dev/null; echo '@reboot ${ANTGAIN_LINUX_START_SCRIPT} start') | crontab -"
+  ag_log "Boot: enabled via /etc/init.d/antgain, OpenRC, or /etc/cron.d/antgain when possible"
+}
+
+ag_linux_sysv_boot_enabled() {
+  local f
+  for f in /etc/rc*.d/S*antgain*; do
+    [ -e "$f" ] && return 0
+  done
+  if command -v chkconfig >/dev/null 2>&1; then
+    chkconfig --list antgain 2>/dev/null | grep -qE ':on|启用' && return 0
+  fi
+  if command -v rc-update >/dev/null 2>&1; then
+    rc-update show 2>/dev/null | grep -qE '[[:space:]]antgain[[:space:]]' && return 0
+  fi
+  return 1
 }
 
 ag_enable_sysv_init() {
@@ -493,9 +512,103 @@ ag_enable_sysv_init() {
     update-rc.d antgain defaults 2>/dev/null || true
   elif command -v chkconfig >/dev/null 2>&1; then
     chkconfig --add antgain 2>/dev/null || true
+    chkconfig antgain on 2>/dev/null || true
   elif command -v insserv >/dev/null 2>&1; then
     insserv antgain 2>/dev/null || true
   fi
+  # BusyBox / Buildroot: symlink into runlevel dirs when tools are missing
+  if ! ag_linux_sysv_boot_enabled && [ -x /etc/init.d/antgain ]; then
+    local rl
+    for rl in 2 3 4 5; do
+      ag_run_root mkdir -p "/etc/rc${rl}.d"
+      ag_run_root ln -sf ../init.d/antgain "/etc/rc${rl}.d/S99antgain" 2>/dev/null || true
+    done
+    for rl in 0 1 6; do
+      ag_run_root mkdir -p "/etc/rc${rl}.d"
+      ag_run_root ln -sf ../init.d/antgain "/etc/rc${rl}.d/K01antgain" 2>/dev/null || true
+    done
+  fi
+}
+
+ag_remove_linux_cron_reboot() {
+  rm -f /etc/cron.d/antgain 2>/dev/null || true
+  if [ -f /etc/crontabs/root ]; then
+    sed -i '/antgain-service/d' /etc/crontabs/root 2>/dev/null \
+      || sed -i '' '/antgain-service/d' /etc/crontabs/root 2>/dev/null \
+      || true
+    if command -v rc-service >/dev/null 2>&1; then
+      rc-service crond restart 2>/dev/null || true
+    fi
+  fi
+  if command -v crontab >/dev/null 2>&1; then
+    crontab -l 2>/dev/null | grep -v 'antgain-service' | crontab - 2>/dev/null || true
+  fi
+}
+
+ag_install_linux_cron_reboot() {
+  local start_cmd="${ANTGAIN_LINUX_START_SCRIPT} start"
+  if [ -d /etc/cron.d ]; then
+    ag_run_root tee /etc/cron.d/antgain >/dev/null <<EOF
+# AntGain CLI — start on boot (fallback when SysV/OpenRC is unavailable)
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+@reboot root ${start_cmd}
+EOF
+    ag_run_root chmod 644 /etc/cron.d/antgain
+    return 0
+  fi
+  if [ -d /etc/crontabs ]; then
+    local tab="/etc/crontabs/root"
+    ag_run_root touch "$tab"
+    if ! grep -q 'antgain-service' "$tab" 2>/dev/null; then
+      ag_run_root sh -c "echo '@reboot ${start_cmd}' >> '$tab'"
+    fi
+    if command -v rc-service >/dev/null 2>&1; then
+      rc-service crond restart 2>/dev/null || true
+    fi
+    return 0
+  fi
+  if command -v crontab >/dev/null 2>&1; then
+    (crontab -l 2>/dev/null | grep -v 'antgain-service'; echo "@reboot ${start_cmd}") | crontab -
+    return 0
+  fi
+  return 1
+}
+
+# Enable boot start for non-systemd Linux (SysV / OpenRC / cron fallback).
+ag_enable_linux_boot_start() {
+  local backend="${1:-helper}"
+
+  if ! ag_should_enable_on_boot; then
+    ag_print_info "Boot start skipped (ANTGAIN_NO_BOOT=1)"
+    return 0
+  fi
+
+  case "$backend" in
+    openrc)
+      rc-update add antgain default 2>/dev/null || true
+      ag_print_success "Boot start enabled (OpenRC: antgain default)"
+      ;;
+    sysv)
+      ag_enable_sysv_init
+      if ag_linux_sysv_boot_enabled; then
+        ag_print_success "Boot start enabled (/etc/init.d/antgain)"
+      else
+        ag_print_warning "SysV enable uncertain; adding cron @reboot fallback"
+        ag_install_linux_cron_reboot && ag_print_success "Boot start enabled (/etc/cron.d/antgain)"
+      fi
+      ;;
+    helper)
+      if ag_install_linux_cron_reboot; then
+        ag_print_success "Boot start enabled (cron @reboot)"
+      else
+        ag_print_warning "Could not register boot start automatically"
+        ag_print_linux_manual_start_hints
+        return 1
+      fi
+      ;;
+  esac
+  return 0
 }
 
 ag_install_sysv_init_script() {
@@ -565,7 +678,7 @@ ag_install_linux_fallback_service() {
 
   if ag_has_openrc && [ -d /etc/init.d ]; then
     ag_install_openrc_init_script "$bin"
-    rc-update add antgain default 2>/dev/null || true
+    ag_enable_linux_boot_start openrc
     if ag_should_start_service; then
       if rc-service antgain start 2>/dev/null; then
         ag_print_success "OpenRC service started (antgain)"
@@ -575,13 +688,13 @@ ag_install_linux_fallback_service() {
       "${ANTGAIN_LINUX_START_SCRIPT}" start && ag_print_success "Node started via ${ANTGAIN_LINUX_START_SCRIPT}"
       return 0
     fi
-    ag_print_success "OpenRC service installed (not started: ANTGAIN_AUTO_START=false)"
+    ag_print_success "OpenRC service installed (starts on next boot)"
     return 0
   fi
 
   if [ -d /etc/init.d ]; then
     ag_install_sysv_init_script "$bin"
-    ag_enable_sysv_init
+    ag_enable_linux_boot_start sysv
     if ag_should_start_service; then
       if /etc/init.d/antgain start 2>/dev/null; then
         ag_print_success "SysV service started (/etc/init.d/antgain)"
@@ -591,23 +704,23 @@ ag_install_linux_fallback_service() {
         ag_print_success "Node started via ${ANTGAIN_LINUX_START_SCRIPT}"
         return 0
       fi
-      ag_print_warning "Could not start automatically"
-      ag_print_linux_manual_start_hints
-      return 1
+      ag_print_warning "Could not start now; will retry on boot"
+      return 0
     fi
-    ag_print_success "SysV init script installed (/etc/init.d/antgain, not started)"
+    ag_print_success "SysV init installed (starts on next boot)"
     return 0
   fi
 
+  ag_enable_linux_boot_start helper
   ag_print_success "Startup helper installed: ${ANTGAIN_LINUX_START_SCRIPT}"
   if ag_should_start_service; then
     if "${ANTGAIN_LINUX_START_SCRIPT}" start 2>/dev/null; then
       ag_print_success "Node started in background"
       return 0
     fi
-    ag_print_warning "Automatic start failed"
+    ag_print_warning "Could not start now; will retry on boot"
+    return 0
   fi
-  ag_print_linux_manual_start_hints
   return 0
 }
 
@@ -622,6 +735,7 @@ ag_remove_linux_fallback_service() {
   elif command -v chkconfig >/dev/null 2>&1; then
     chkconfig --del antgain 2>/dev/null || true
   fi
+  ag_remove_linux_cron_reboot
   rm -f /etc/init.d/antgain
   rm -f "$ANTGAIN_LINUX_START_SCRIPT"
   rm -f "$ANTGAIN_LINUX_ENV_FILE"
@@ -682,7 +796,12 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable antgain.service
+  if ag_should_enable_on_boot; then
+    systemctl enable antgain.service
+    ag_print_success "Boot start enabled (systemd: antgain.service)"
+  else
+    systemctl disable antgain.service 2>/dev/null || true
+  fi
 
   if ag_should_start_service; then
     systemctl restart antgain.service
@@ -691,13 +810,13 @@ EOF
       ag_print_success "systemd service is running"
       return 0
     fi
-    ag_print_warning "Service installed but not active yet"
+    ag_print_warning "Service installed but not active yet (enabled on boot)"
     ag_print_info "Check: journalctl -u antgain -n 50 --no-pager"
     return 1
   fi
 
-  ag_print_success "systemd service installed and enabled (not started: ANTGAIN_AUTO_START=false)"
-  ag_print_info "Start manually: sudo systemctl start antgain.service"
+  ag_print_success "systemd service installed (starts on next boot)"
+  ag_print_info "Start now: sudo systemctl start antgain.service"
   return 0
 }
 
@@ -765,26 +884,31 @@ EOF
   launchctl unload "$plist" 2>/dev/null || true
   sleep 1
 
-  if ag_should_start_service; then
+  # Always register for boot (RunAtLoad + KeepAlive in plist).
+  if ag_should_enable_on_boot; then
     if launchctl bootstrap system "$plist" 2>/dev/null; then
       launchctl enable "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
-      launchctl kickstart -k "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
     else
       launchctl load -w "$plist"
     fi
+    ag_print_success "Boot start enabled (launchd: ${ANTGAIN_SERVICE_NAME})"
+  fi
+
+  if ag_should_start_service; then
+    launchctl kickstart -k "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
     sleep 2
     if launchctl print "system/${ANTGAIN_SERVICE_NAME}" >/dev/null 2>&1 \
       || launchctl list 2>/dev/null | grep -q "${ANTGAIN_SERVICE_NAME}"; then
-      ag_print_success "LaunchDaemon loaded"
+      ag_print_success "LaunchDaemon running"
       return 0
     fi
-    ag_print_warning "LaunchDaemon may not be running yet"
+    ag_print_warning "LaunchDaemon may not be running yet (enabled on boot)"
     ag_print_info "Check: tail -f /var/log/antgain.error.log"
     return 1
   fi
 
-  ag_print_success "LaunchDaemon installed (not started: ANTGAIN_AUTO_START=false)"
-  ag_print_info "Start manually: sudo launchctl kickstart -k system/${ANTGAIN_SERVICE_NAME}"
+  ag_print_success "LaunchDaemon installed (starts on next boot)"
+  ag_print_info "Start now: sudo launchctl kickstart -k system/${ANTGAIN_SERVICE_NAME}"
   return 0
 }
 

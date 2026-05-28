@@ -71,9 +71,9 @@ _run_service_install() {
 if [ -n "${ANTGAIN_API_KEY:-}" ] && ag_should_install_service; then
   ag_log ""
   if ag_should_start_service; then
-    ag_print_info "API key provided — installing and starting background service..."
+    ag_print_info "API key provided — installing service (boot start + run now)..."
   else
-    ag_print_info "API key provided — installing background service (ANTGAIN_AUTO_START=false, will not start)..."
+    ag_print_info "API key provided — installing service (boot start enabled, run now skipped)..."
   fi
   if ! _run_service_install; then
     ag_print_warning "Background service setup did not complete; CLI binary is installed."
