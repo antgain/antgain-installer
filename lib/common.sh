@@ -239,7 +239,7 @@ ag_fetch_cli_release() {
   json="$(curl -fsSL "${ANTGAIN_R2_BASE_URL}/cli/latest.json" 2>/dev/null || true)"
   if [ -z "$json" ]; then
     ag_print_error "Failed to fetch ${ANTGAIN_R2_BASE_URL}/cli/latest.json"
-    echo "Specify a version: curl ... | bash -s 1.0.30" >&2
+    echo "Specify a version: curl ... | bash -s 1.1.0" >&2
     return 1
   fi
 

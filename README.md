@@ -1,95 +1,42 @@
-# AntGain Installer
+# AntGain
 
-One-line installation scripts for AntGain Desktop and CLI.
+AntGain lets you share unused network bandwidth from your computer or server and earn rewards. Install the node, sign in with your API key, and run it in the background.
 
-## Desktop Client Installation
+**Get your API key:** [antgain.app → Settings](https://antgain.app/dashboard/settings)
 
-**Auto-install latest version:**
+---
+
+## Guides
+
+| Topic | Document |
+|-------|----------|
+| Install on **Linux** (PC, VPS, server) | [docs/linux.md](docs/linux.md) |
+| Install on **Linux ARM** (RK3528, armhf, etc.) | [docs/linux-arm.md](docs/linux-arm.md) |
+| Install on **macOS** | [docs/macos.md](docs/macos.md) |
+| Run in **Docker** | [docs/docker.md](docs/docker.md) |
+| **CLI commands** (all platforms) | [docs/commands.md](docs/commands.md) |
+
+**Docker image:** [Docker Hub — pinors/antgain-cli](https://hub.docker.com/r/pinors/antgain-cli)
+
+---
+
+## What you need
+
+- An AntGain account and API key  
+- A supported system (see the platform guides above)  
+- For Docker: a **fixed** device UUID per container (explained in [docs/docker.md](docs/docker.md))
+
+---
+
+## Publishing docs on antgain.app
+
+User-facing docs are rendered at [docs.antgain.app](https://docs.antgain.app) from the `antgain-web` repo. After editing files under `docs/`, run in `antgain-web`:
+
 ```bash
-curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
+pnpm run sync:installer-docs
 ```
 
-**Install specific version:**
-```bash
-curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.29
-```
-
-### What it does
-
-- ✅ Detects system architecture (x86_64 only)
-- ✅ Checks for Debian/Ubuntu-based distribution
-- ✅ Fetches latest version from GitHub Release
-- ✅ Downloads and installs .deb package
-- ✅ Automatically handles dependencies
-
-## CLI Installation
-
-### Quick Install (Universal Script)
-
-**Auto-install latest CLI version:**
-```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash
-```
-
-**Install specific CLI version:**
-```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.29
-```
-
-### DEB Package Install (Debian/Ubuntu)
-
-**Auto-install latest CLI version:**
-```bash
-curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash
-```
-
-**Install specific CLI version:**
-```bash
-curl -fsSL https://install.antgain.app/install-cli-deb.sh | sudo bash -s 1.0.29
-```
-
-### Install as Systemd Service
-
-**One-line with API Key argument:**
-```bash
-curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash -s YOUR_API_KEY
-```
-
-**With environment variable:**
-```bash
-export ANTGAIN_API_KEY=your-api-key
-curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
-```
-
-**Interactive (will prompt for API Key):**
-```bash
-curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash
-```
-
-### Docker Installation
-
-You can also run AntGain CLI using Docker.
-
-**Quick Start:**
-```bash
-docker run -d --name antgain --restart always -e ANTGAIN_API_KEY=YOUR_API_KEY pinors/antgain-cli:latest
-```
-
-Docker Hub: [pinors/antgain-cli](https://hub.docker.com/r/pinors/antgain-cli)
-
-### What CLI installer does
-
-- ✅ Detects OS (Linux/macOS) and architecture (x86_64/ARM64)
-- ✅ Fetches latest CLI version from R2
-- ✅ Downloads appropriate binary
-- ✅ Installs to /usr/local/bin
-- ✅ Makes executable
-
-## Requirements
-
-- Ubuntu 22.04+ or Debian-based distribution (Desktop)
-- Linux/macOS with x86_64 or ARM64 (CLI)
-- `curl` and basic tools
+---
 
 ## License
 

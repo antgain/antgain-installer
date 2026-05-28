@@ -3,7 +3,7 @@ set -euo pipefail
 
 # AntGain Desktop installer (Debian/Ubuntu x86_64 .deb)
 #   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
-#   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.30
+#   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.1.0
 
 _ag_installer_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/lib/common.sh" ]; then
