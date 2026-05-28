@@ -149,10 +149,25 @@ ag_parse_cli_args() {
     ag_apply_cli_arg "$0"
   fi
   for arg in "$@"; do
+    [ "$arg" = "--" ] && continue
     ag_apply_cli_arg "$arg"
   done
 
   export TARGET_VERSION ANTGAIN_API_KEY
+}
+
+ag_validate_cli_install_args() {
+  if [ -n "${ANTGAIN_API_KEY:-}" ] && ag_is_version_string "$ANTGAIN_API_KEY"; then
+    ag_print_error "The API key argument looks like a version number ($ANTGAIN_API_KEY)."
+    ag_log "Your install script may be outdated, or arguments were parsed incorrectly."
+    ag_log "Try:  VERSION=1.1.0 ANTGAIN_API_KEY=your-key curl -fsSL .../install-cli.sh | bash"
+    ag_log "Or:   curl -fsSL .../install-cli.sh | bash -s -- 1.1.0 your-key"
+    return 1
+  fi
+  if [ -n "${TARGET_VERSION:-}" ] && [ -z "${ANTGAIN_API_KEY:-}" ] && [ "$#" -ge 2 ]; then
+    ag_print_warning "Second argument was not accepted as API key (check quoting)."
+  fi
+  return 0
 }
 
 ag_json_cli_platform() {

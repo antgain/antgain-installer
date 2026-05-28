@@ -3,12 +3,12 @@ set -euo pipefail
 
 # AntGain CLI installer
 #   curl -fsSL https://install.antgain.app/install-cli.sh | bash
-#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.0.30
+#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.1.0
 #   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- YOUR_API_KEY
-#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.0.30 YOUR_API_KEY
-#   (also works without --: bash -s 1.0.30 — version is read from $0)
+#   VERSION=1.1.0 curl -fsSL https://install.antgain.app/install-cli.sh | bash
+# See README.md: command syntax, version pinning, macOS quarantine, publishing releases.
 #
-# Env: ANTGAIN_API_KEY, VERSION, ANTGAIN_AUTO_START=true, ANTGAIN_SKIP_START=1
+# Env: VERSION, ANTGAIN_API_KEY, ANTGAIN_AUTO_START=true, ANTGAIN_SKIP_START=1
 
 _ag_installer_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/lib/common.sh" ]; then
@@ -31,9 +31,11 @@ ag_log "================================"
 
 ag_detect_platform
 ag_parse_cli_args "$@"
+ag_validate_cli_install_args || exit 1
 
 ag_log "System: ${OS_TYPE}/${ARCH_TYPE} (${PLATFORM_KEY})"
 [ -n "${TARGET_VERSION:-}" ] && ag_log "Target version: ${TARGET_VERSION}"
+[ -n "${ANTGAIN_API_KEY:-}" ] && ag_log "API key: provided (${#ANTGAIN_API_KEY} chars)"
 
 ag_install_cli_binary "$PLATFORM_KEY" "${TARGET_VERSION:-}" "$ANTGAIN_INSTALL_DIR"
 

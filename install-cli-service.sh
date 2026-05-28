@@ -59,8 +59,13 @@ if [ -z "${ANTGAIN_API_KEY:-}" ]; then
   exit 1
 fi
 
-if [ "${#ANTGAIN_API_KEY}" -lt 10 ]; then
-  ag_print_warning "API key looks short — please verify"
+if ag_is_version_string "$ANTGAIN_API_KEY"; then
+  ag_print_error "Argument looks like a version ($ANTGAIN_API_KEY), not an API key."
+  ag_log "Use: curl -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli.sh | bash -s -- VERSION YOUR_API_KEY"
+  exit 1
+fi
+if [ "${#ANTGAIN_API_KEY}" -lt 32 ]; then
+  ag_print_warning "API key is shorter than expected (${#ANTGAIN_API_KEY} chars) — please verify"
 fi
 
 skip_confirm="false"
