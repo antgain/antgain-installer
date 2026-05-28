@@ -8,6 +8,23 @@ ANTGAIN_DATA_DIR="${ANTGAIN_DATA_DIR:-/var/lib/antgain}"
 ANTGAIN_SERVICE_NAME="${ANTGAIN_SERVICE_NAME:-app.antgain.cli}"
 ANTGAIN_AUTO_START="${ANTGAIN_AUTO_START:-true}"
 
+ag_env_truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Install service unit when API key is provided (unless skip).
+ag_should_install_service() {
+  [ "${ANTGAIN_SKIP_START:-}" != "1" ] && ! ag_env_truthy "${ANTGAIN_SKIP_START:-}"
+}
+
+# Start/restart service after unit is written (default on).
+ag_should_start_service() {
+  ag_env_truthy "${ANTGAIN_AUTO_START:-true}"
+}
+
 ag_log() { echo "$@" >&2; }
 ag_print_error() { echo -e "\033[0;31m❌ $*\033[0m" >&2; }
 ag_print_success() { echo -e "\033[0;32m✅ $*\033[0m" >&2; }
@@ -398,6 +415,219 @@ ag_ensure_data_dir() {
   fi
 }
 
+ANTGAIN_LINUX_ENV_FILE="${ANTGAIN_LINUX_ENV_FILE:-/etc/antgain/env}"
+ANTGAIN_LINUX_START_SCRIPT="${ANTGAIN_LINUX_START_SCRIPT:-/usr/local/sbin/antgain-service}"
+
+ag_has_systemd() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  if [ -d /run/systemd/system ] || [ -S /run/systemd/private ] 2>/dev/null; then
+    return 0
+  fi
+  if [ -r /proc/1/comm ] && grep -q '^systemd$' /proc/1/comm 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+ag_has_openrc() {
+  command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1
+}
+
+ag_write_linux_env_file() {
+  local api_key="$1"
+  ag_run_root mkdir -p "$(dirname "$ANTGAIN_LINUX_ENV_FILE")"
+  ag_run_root tee "$ANTGAIN_LINUX_ENV_FILE" >/dev/null <<EOF
+ANTGAIN_API_KEY=${api_key}
+LOG_LEVEL=${LOG_LEVEL:-info}
+LOG_DIR=${ANTGAIN_DATA_DIR}/logs
+EOF
+  ag_run_root chmod 600 "$ANTGAIN_LINUX_ENV_FILE"
+}
+
+ag_install_linux_start_script() {
+  local bin="$1"
+  ag_run_root mkdir -p "$(dirname "$ANTGAIN_LINUX_START_SCRIPT")"
+  ag_run_root tee "$ANTGAIN_LINUX_START_SCRIPT" >/dev/null <<EOF
+#!/bin/sh
+set -e
+ENVFILE="${ANTGAIN_LINUX_ENV_FILE}"
+BIN="${bin}"
+[ -f "\$ENVFILE" ] && . "\$ENVFILE"
+export ANTGAIN_API_KEY LOG_LEVEL LOG_DIR
+case "\${1:-start}" in
+  start)
+    if [ -z "\${ANTGAIN_API_KEY:-}" ]; then
+      echo "ANTGAIN_API_KEY missing in \$ENVFILE" >&2
+      exit 1
+    fi
+    exec "\$BIN" run --daemon --api-key "\$ANTGAIN_API_KEY"
+    ;;
+  stop)
+    exec "\$BIN" stop
+    ;;
+  status)
+    exec "\$BIN" status
+    ;;
+  *)
+    echo "Usage: \$0 {start|stop|status}" >&2
+    exit 1
+    ;;
+esac
+EOF
+  ag_run_root chmod 755 "$ANTGAIN_LINUX_START_SCRIPT"
+}
+
+ag_print_linux_manual_start_hints() {
+  ag_log ""
+  ag_log "Manual start (no systemd on this device):"
+  ag_log "  export ANTGAIN_API_KEY=your-key"
+  ag_log "  antgain run --daemon"
+  ag_log "Or use the installed helper:"
+  ag_log "  sudo ${ANTGAIN_LINUX_START_SCRIPT} start"
+  ag_log "  sudo ${ANTGAIN_LINUX_START_SCRIPT} stop"
+  ag_log "Boot (cron):  (crontab -l 2>/dev/null; echo '@reboot ${ANTGAIN_LINUX_START_SCRIPT} start') | crontab -"
+}
+
+ag_enable_sysv_init() {
+  if command -v update-rc.d >/dev/null 2>&1; then
+    update-rc.d antgain defaults 2>/dev/null || true
+  elif command -v chkconfig >/dev/null 2>&1; then
+    chkconfig --add antgain 2>/dev/null || true
+  elif command -v insserv >/dev/null 2>&1; then
+    insserv antgain 2>/dev/null || true
+  fi
+}
+
+ag_install_sysv_init_script() {
+  local bin="$1"
+  ag_run_root tee /etc/init.d/antgain >/dev/null <<EOF
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          antgain
+# Required-Start:    \$network \$remote_fs
+# Required-Stop:     \$network \$remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: AntGain CLI Node
+### END INIT INFO
+
+"${ANTGAIN_LINUX_START_SCRIPT}" "\$1"
+EOF
+  ag_run_root chmod 755 /etc/init.d/antgain
+}
+
+ag_install_openrc_init_script() {
+  local bin="$1"
+  ag_run_root tee /etc/init.d/antgain >/dev/null <<EOF
+#!/sbin/openrc-run
+
+name="antgain"
+description="AntGain CLI Node"
+
+depend() {
+    need net
+    after firewall
+}
+
+: "\${ANTGAIN_ENVFILE:=${ANTGAIN_LINUX_ENV_FILE}}"
+[ -f "\$ANTGAIN_ENVFILE" ] && . "\$ANTGAIN_ENVFILE"
+export ANTGAIN_API_KEY LOG_LEVEL LOG_DIR
+
+command="${bin}"
+command_args="run --daemon --api-key \${ANTGAIN_API_KEY}"
+command_background="yes"
+pidfile="/run/antgain.pid"
+EOF
+  ag_run_root chmod 755 /etc/init.d/antgain
+}
+
+ag_install_linux_fallback_service() {
+  local api_key="$1"
+  local bin="${2:-$(command -v antgain)}"
+  local skip_confirm="${3:-false}"
+
+  ag_need_root
+  ag_ensure_data_dir
+
+  if [ "$skip_confirm" != "true" ] && [ "${ANTGAIN_SKIP_CONFIRM:-}" != "1" ]; then
+    ag_log ""
+    ag_log "systemd is not available — using SysV/OpenRC or a startup helper."
+    ag_log "Env file: ${ANTGAIN_LINUX_ENV_FILE}"
+    ag_log ""
+    if ! ag_confirm_default_no "Continue? [y/N] "; then
+      ag_print_warning "Service installation cancelled"
+      return 1
+    fi
+  fi
+
+  ag_write_linux_env_file "$api_key"
+  ag_install_linux_start_script "$bin"
+
+  if ag_has_openrc && [ -d /etc/init.d ]; then
+    ag_install_openrc_init_script "$bin"
+    rc-update add antgain default 2>/dev/null || true
+    if ag_should_start_service; then
+      if rc-service antgain start 2>/dev/null; then
+        ag_print_success "OpenRC service started (antgain)"
+        return 0
+      fi
+      ag_print_warning "OpenRC start failed; trying helper script"
+      "${ANTGAIN_LINUX_START_SCRIPT}" start && ag_print_success "Node started via ${ANTGAIN_LINUX_START_SCRIPT}"
+      return 0
+    fi
+    ag_print_success "OpenRC service installed (not started: ANTGAIN_AUTO_START=false)"
+    return 0
+  fi
+
+  if [ -d /etc/init.d ]; then
+    ag_install_sysv_init_script "$bin"
+    ag_enable_sysv_init
+    if ag_should_start_service; then
+      if /etc/init.d/antgain start 2>/dev/null; then
+        ag_print_success "SysV service started (/etc/init.d/antgain)"
+        return 0
+      fi
+      if "${ANTGAIN_LINUX_START_SCRIPT}" start 2>/dev/null; then
+        ag_print_success "Node started via ${ANTGAIN_LINUX_START_SCRIPT}"
+        return 0
+      fi
+      ag_print_warning "Could not start automatically"
+      ag_print_linux_manual_start_hints
+      return 1
+    fi
+    ag_print_success "SysV init script installed (/etc/init.d/antgain, not started)"
+    return 0
+  fi
+
+  ag_print_success "Startup helper installed: ${ANTGAIN_LINUX_START_SCRIPT}"
+  if ag_should_start_service; then
+    if "${ANTGAIN_LINUX_START_SCRIPT}" start 2>/dev/null; then
+      ag_print_success "Node started in background"
+      return 0
+    fi
+    ag_print_warning "Automatic start failed"
+  fi
+  ag_print_linux_manual_start_hints
+  return 0
+}
+
+ag_remove_linux_fallback_service() {
+  /etc/init.d/antgain stop 2>/dev/null || true
+  if ag_has_openrc; then
+    rc-service antgain stop 2>/dev/null || true
+    rc-update del antgain 2>/dev/null || true
+  fi
+  if command -v update-rc.d >/dev/null 2>&1; then
+    update-rc.d -f antgain remove 2>/dev/null || true
+  elif command -v chkconfig >/dev/null 2>&1; then
+    chkconfig --del antgain 2>/dev/null || true
+  fi
+  rm -f /etc/init.d/antgain
+  rm -f "$ANTGAIN_LINUX_START_SCRIPT"
+  rm -f "$ANTGAIN_LINUX_ENV_FILE"
+  rmdir /etc/antgain 2>/dev/null || true
+}
+
 ag_install_systemd_service() {
   local api_key="$1"
   local bin="${2:-$(command -v antgain)}"
@@ -453,17 +683,22 @@ EOF
 
   systemctl daemon-reload
   systemctl enable antgain.service
-  systemctl restart antgain.service
-  sleep 2
 
-  if systemctl is-active --quiet antgain.service; then
-    ag_print_success "systemd service is running"
-    return 0
+  if ag_should_start_service; then
+    systemctl restart antgain.service
+    sleep 2
+    if systemctl is-active --quiet antgain.service; then
+      ag_print_success "systemd service is running"
+      return 0
+    fi
+    ag_print_warning "Service installed but not active yet"
+    ag_print_info "Check: journalctl -u antgain -n 50 --no-pager"
+    return 1
   fi
 
-  ag_print_warning "Service installed but not active yet"
-  ag_print_info "Check: journalctl -u antgain -n 50 --no-pager"
-  return 1
+  ag_print_success "systemd service installed and enabled (not started: ANTGAIN_AUTO_START=false)"
+  ag_print_info "Start manually: sudo systemctl start antgain.service"
+  return 0
 }
 
 ag_install_launchd_service() {
@@ -530,23 +765,27 @@ EOF
   launchctl unload "$plist" 2>/dev/null || true
   sleep 1
 
-  if launchctl bootstrap system "$plist" 2>/dev/null; then
-    launchctl enable "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
-    launchctl kickstart -k "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
-  else
-    launchctl load -w "$plist"
+  if ag_should_start_service; then
+    if launchctl bootstrap system "$plist" 2>/dev/null; then
+      launchctl enable "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
+      launchctl kickstart -k "system/${ANTGAIN_SERVICE_NAME}" 2>/dev/null || true
+    else
+      launchctl load -w "$plist"
+    fi
+    sleep 2
+    if launchctl print "system/${ANTGAIN_SERVICE_NAME}" >/dev/null 2>&1 \
+      || launchctl list 2>/dev/null | grep -q "${ANTGAIN_SERVICE_NAME}"; then
+      ag_print_success "LaunchDaemon loaded"
+      return 0
+    fi
+    ag_print_warning "LaunchDaemon may not be running yet"
+    ag_print_info "Check: tail -f /var/log/antgain.error.log"
+    return 1
   fi
 
-  sleep 2
-  if launchctl print "system/${ANTGAIN_SERVICE_NAME}" >/dev/null 2>&1 \
-    || launchctl list 2>/dev/null | grep -q "${ANTGAIN_SERVICE_NAME}"; then
-    ag_print_success "LaunchDaemon loaded"
-    return 0
-  fi
-
-  ag_print_warning "LaunchDaemon may not be running yet"
-  ag_print_info "Check: tail -f /var/log/antgain.error.log"
-  return 1
+  ag_print_success "LaunchDaemon installed (not started: ANTGAIN_AUTO_START=false)"
+  ag_print_info "Start manually: sudo launchctl kickstart -k system/${ANTGAIN_SERVICE_NAME}"
+  return 0
 }
 
 ag_install_and_start_service() {
@@ -567,11 +806,12 @@ ag_install_and_start_service() {
   os="$(uname -s)"
   case "$os" in
     Linux*)
-      if ! command -v systemctl >/dev/null 2>&1; then
-        ag_print_error "systemd is required for service install on Linux"
-        return 1
+      if ag_has_systemd; then
+        ag_install_systemd_service "$api_key" "$(command -v antgain)" "$skip_confirm"
+      else
+        ag_print_info "systemd not detected — using SysV/OpenRC/startup helper"
+        ag_install_linux_fallback_service "$api_key" "$(command -v antgain)" "$skip_confirm"
       fi
-      ag_install_systemd_service "$api_key" "$(command -v antgain)" "$skip_confirm"
       ;;
     Darwin*)
       ag_install_launchd_service "$api_key" "$(command -v antgain)" "$skip_confirm"
@@ -612,9 +852,18 @@ ag_print_service_status() {
   ag_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   case "$os" in
     Linux*)
-      if command -v systemctl >/dev/null 2>&1; then
+      if ag_has_systemd; then
         systemctl is-active antgain.service 2>/dev/null && ag_log "  systemd: running" || ag_log "  systemd: not running"
         systemctl is-enabled antgain.service 2>/dev/null || true
+      elif [ -f /etc/init.d/antgain ]; then
+        if [ -x "${ANTGAIN_LINUX_START_SCRIPT}" ] && pgrep -f '[a]ntgain' >/dev/null 2>&1; then
+          ag_log "  init: running (pgrep antgain)"
+        else
+          ag_log "  init: not running (/etc/init.d/antgain)"
+        fi
+        ag_log "  helper: ${ANTGAIN_LINUX_START_SCRIPT}"
+      elif [ -x "${ANTGAIN_LINUX_START_SCRIPT}" ]; then
+        ag_log "  helper: ${ANTGAIN_LINUX_START_SCRIPT} (no init.d)"
       fi
       ;;
     Darwin*)

@@ -68,13 +68,21 @@ _run_service_install() {
   fi
 }
 
-if [ -n "${ANTGAIN_API_KEY:-}" ] && [ "${ANTGAIN_SKIP_START:-}" != "1" ] && [ "${ANTGAIN_AUTO_START:-true}" = "true" ]; then
+if [ -n "${ANTGAIN_API_KEY:-}" ] && ag_should_install_service; then
   ag_log ""
-  ag_print_info "API key provided — installing and starting background service..."
-  _run_service_install
-  ag_print_service_status
-elif [ -n "${ANTGAIN_API_KEY:-}" ] && [ "${ANTGAIN_SKIP_START:-}" = "1" ]; then
-  ag_print_info "Skipped service (ANTGAIN_SKIP_START=1). Run: ANTGAIN_API_KEY=... antgain"
+  if ag_should_start_service; then
+    ag_print_info "API key provided — installing and starting background service..."
+  else
+    ag_print_info "API key provided — installing background service (ANTGAIN_AUTO_START=false, will not start)..."
+  fi
+  if ! _run_service_install; then
+    ag_print_warning "Background service setup did not complete; CLI binary is installed."
+    ag_print_linux_manual_start_hints
+  else
+    ag_print_service_status
+  fi
+elif [ -n "${ANTGAIN_API_KEY:-}" ] && ! ag_should_install_service; then
+  ag_print_info "Skipped service install (ANTGAIN_SKIP_START). Run: curl -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY"
 else
   ag_log ""
   ag_log "Next steps:"

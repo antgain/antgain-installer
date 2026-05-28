@@ -41,12 +41,18 @@ _ag_ask_yes() {
   ag_confirm_default_no "$prompt"
 }
 
-# systemd / launchd
-if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files antgain.service >/dev/null 2>&1 || [ -f /etc/systemd/system/antgain.service ]; then
+# systemd / SysV / OpenRC / launchd
+if [ "$(uname -s)" = "Linux" ]; then
+  if ag_has_systemd && { systemctl list-unit-files antgain.service >/dev/null 2>&1 || [ -f /etc/systemd/system/antgain.service ]; }; then
     ag_print_info "Removing systemd service..."
     ag_remove_systemd_service
     ag_print_success "Removed systemd service"
+    REMOVED=true
+  fi
+  if [ -f /etc/init.d/antgain ] || [ -f "${ANTGAIN_LINUX_ENV_FILE:-/etc/antgain/env}" ]; then
+    ag_print_info "Removing SysV/OpenRC/startup helper..."
+    ag_remove_linux_fallback_service
+    ag_print_success "Removed Linux init/service files"
     REMOVED=true
   fi
 elif [ "$(uname -s)" = "Darwin" ]; then

@@ -5,7 +5,8 @@ set -euo pipefail
 #   curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash -s YOUR_API_KEY
 #   export ANTGAIN_API_KEY=xxx && curl ... | sudo bash
 #
-# Env: ANTGAIN_SKIP_CONFIRM=1 (non-interactive), ANTGAIN_INSTALLER_DIR (local dev)
+# Env: ANTGAIN_SKIP_CONFIRM=1, ANTGAIN_SKIP_START=1 (install unit only),
+#      ANTGAIN_AUTO_START=false (install without start), ANTGAIN_INSTALLER_DIR
 
 _ag_installer_root="${ANTGAIN_INSTALLER_DIR:-}"
 if [ -z "$_ag_installer_root" ]; then
@@ -73,11 +74,29 @@ if [ "${ANTGAIN_SKIP_CONFIRM:-}" = "1" ] || ! ag_is_tty; then
   skip_confirm="true"
 fi
 
-ag_install_and_start_service "$ANTGAIN_API_KEY" "$skip_confirm"
+if ! ag_should_install_service; then
+  ag_print_info "Skipped service install (ANTGAIN_SKIP_START)."
+  exit 0
+fi
+
+if ! ag_should_start_service; then
+  ag_print_info "Installing service unit without starting (ANTGAIN_AUTO_START=false)..."
+fi
+
+if ! ag_install_and_start_service "$ANTGAIN_API_KEY" "$skip_confirm"; then
+  ag_print_warning "Service setup did not complete."
+  ag_print_linux_manual_start_hints
+  exit 1
+fi
 ag_print_service_status
 
 ag_log ""
 ag_print_success "Service installation complete"
-ag_log "  Linux:   sudo systemctl status antgain"
+if ag_has_systemd; then
+  ag_log "  Linux:   sudo systemctl status antgain"
+else
+  ag_log "  Linux:   sudo ${ANTGAIN_LINUX_START_SCRIPT:-/usr/local/sbin/antgain-service} status"
+  ag_log "           sudo /etc/init.d/antgain status  (if present)"
+fi
 ag_log "  macOS:   sudo launchctl print system/${ANTGAIN_SERVICE_NAME}"
 ag_log "  Uninstall all: curl -fsSL ${ANTGAIN_INSTALL_BASE}/uninstall-cli.sh | sudo bash"
