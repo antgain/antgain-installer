@@ -1,177 +1,76 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# AntGain CLI Installation Script
-# Usage: 
-#   curl -fsSL https://install.antgain.app/cli.sh | bash
-#   curl -fsSL https://install.antgain.app/cli.sh | bash -s 1.0.0
-#   curl -fsSL https://install.antgain.app/cli.sh | bash -s YOUR_API_KEY
+# AntGain CLI installer
+#   curl -fsSL https://install.antgain.app/install-cli.sh | bash
+#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.30
+#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s YOUR_API_KEY
+#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s 1.0.30 YOUR_API_KEY
+#
+# Env: ANTGAIN_API_KEY, VERSION, ANTGAIN_AUTO_START=true, ANTGAIN_SKIP_START=1
 
-echo "🚀 AntGain CLI Installer"
-echo "================================"
-
-# Configuration
-R2_BASE_URL="${R2_BASE_URL:-https://pub-a6321dc4515447b698de8db2567150ff.r2.dev}"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
-
-# Detect OS and Architecture
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-
-case "$OS" in
-    Linux*)
-        OS_TYPE="linux"
-        ;;
-    Darwin*)
-        OS_TYPE="darwin"
-        ;;
-    *)
-        echo "❌ Unsupported OS: $OS"
-        exit 1
-        ;;
-esac
-
-case "$ARCH" in
-    x86_64|amd64)
-        ARCH_TYPE="amd64"
-        ;;
-    aarch64|arm64)
-        ARCH_TYPE="arm64"
-        ;;
-    *)
-        echo "❌ Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-esac
-
-PLATFORM_KEY="${OS_TYPE}-${ARCH_TYPE}"
-
-echo "📋 System Info:"
-echo "  OS: $OS_TYPE"
-echo "  Arch: $ARCH_TYPE"
-echo "  Key: $PLATFORM_KEY"
-
-# Get version or API key from argument
-API_KEY=""
-VERSION=""
-
-if [ -n "$1" ]; then
-    # Simple regex to check if it looks like a version number (v1.0.0 or 1.0.0)
-    if [[ "$1" =~ ^[vV]?[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-        VERSION="$1"
-    else
-        API_KEY="$1"
-    fi
-fi
-
-if [ -n "$VERSION" ]; then
-    echo "🎯 Target Version: $VERSION"
-elif [ -z "$VERSION" ]; then
-    # Fetch latest version
-    echo "📡 Fetching latest CLI version..."
-    LATEST_JSON_URL="${R2_BASE_URL}/cli/latest.json"
-
-    VERSION_DATA=$(curl -fsSL "$LATEST_JSON_URL" 2>/dev/null || echo "")
-    
-    if [ -z "$VERSION_DATA" ]; then
-        echo "❌ Failed to fetch version info"
-        echo ""
-        echo "You can install manually from:"
-        echo "  https://github.com/antgain/antgain/releases"
-        exit 1
-    fi
-    
-    # Extract URL for the specific platform
-    # Strategy: Flatten JSON to single line, find "linux-amd64": { ... } and extract "url" value from it.
-    # We grep for: "KEY": *{ [any chars not }] }
-    DOWNLOAD_URL=$(echo "$VERSION_DATA" | tr -d '\n' | grep -o "\"$PLATFORM_KEY\":[[:space:]]*{[^}]*}" | grep -o '"url":[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
-
-    # Fallback extraction: extract the first version number found
-    VERSION=$(echo "$VERSION_DATA" | tr -d '\n' | grep -o '"version":[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
-
-    if [ -z "$DOWNLOAD_URL" ]; then
-        echo "❌ Could not find a download URL for platform: $PLATFORM_KEY"
-        echo "Available keys might be different currently."
-        exit 1
-    fi
-fi
-
-echo "📦 Found version: $VERSION"
-
-if [ -z "$DOWNLOAD_URL" ]; then
-    # If version specified manually, construct URL
-    FILENAME="antgain-${OS_TYPE}-${ARCH_TYPE}.tar.gz"
-    DOWNLOAD_URL="${R2_BASE_URL}/cli/releases/${VERSION}/${FILENAME}"
-fi
-
-echo "📥 Downloading from: $DOWNLOAD_URL"
-
-# Download
-TMP_DIR=$(mktemp -d)
-FILENAME="antgain.tar.gz"
-cd "$TMP_DIR"
-
-if ! curl -fL -o "$FILENAME" "$DOWNLOAD_URL"; then
-    echo "❌ Download failed"
-    rm -rf "$TMP_DIR"
+_ag_installer_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/lib/common.sh" ]; then
+  ANTGAIN_INSTALLER_DIR="$_ag_installer_root"
+  # shellcheck disable=SC1091
+  . "${_ag_installer_root}/lib/common.sh"
+else
+  _ag_common_tmp="$(mktemp)"
+  if ! curl -fsSL "${ANTGAIN_INSTALL_BASE:-https://install.antgain.app}/lib/common.sh" -o "$_ag_common_tmp"; then
+    echo "Failed to load installer library" >&2
     exit 1
+  fi
+  # shellcheck disable=SC1090
+  . "$_ag_common_tmp"
+  rm -f "$_ag_common_tmp"
 fi
 
-# Extract
-echo "📦 Extracting..."
-tar xzf "$FILENAME"
+ag_log "AntGain CLI Installer"
+ag_log "================================"
 
-# Install
-# Determine the binary name. It usually extracts to 'antgain' or a folder.
-# We'll assume it extracts 'antgain' binary in the current dir or immediate subdir.
-if [ -f "antgain" ]; then
-    BINARY="antgain"
-elif [ -f "antgain-${PLATFORM_KEY}/antgain" ]; then
-    BINARY="antgain-${PLATFORM_KEY}/antgain"
-else
-    # Try to find it
-    BINARY=$(find . -type f -name "antgain" | head -n 1)
-fi
+ag_detect_platform
+ag_parse_cli_args "$@"
 
-if [ -z "$BINARY" ] || [ ! -f "$BINARY" ]; then
-    echo "❌ Could not find 'antgain' binary in extracted archive."
-    rm -rf "$TMP_DIR"
-    exit 1
-fi
+ag_log "System: ${OS_TYPE}/${ARCH_TYPE} (${PLATFORM_KEY})"
+[ -n "${TARGET_VERSION:-}" ] && ag_log "Target version: ${TARGET_VERSION}"
 
-echo "📦 Installing to $INSTALL_DIR..."
-if [ -w "$INSTALL_DIR" ]; then
-    mv "$BINARY" "$INSTALL_DIR/antgain"
-    chmod +x "$INSTALL_DIR/antgain"
-else
-    sudo mv "$BINARY" "$INSTALL_DIR/antgain"
-    sudo chmod +x "$INSTALL_DIR/antgain"
-fi
+ag_install_cli_binary "$PLATFORM_KEY" "${TARGET_VERSION:-}" "$ANTGAIN_INSTALL_DIR"
+ag_verify_cli_binary
 
-# Cleanup
-cd - > /dev/null
-rm -rf "$TMP_DIR"
+ag_log ""
+ag_print_success "AntGain CLI installed successfully"
 
-echo "✅ Installation successful!"
-echo ""
-
-if [ -n "$API_KEY" ]; then
-    echo "🔑 API Key detected. Setting up systemd service..."
-    # URL for service installer
-    SERVICE_INSTALLER_URL="https://install.antgain.app/install-cli-service.sh"
-    
-    echo "📥 Fetching service installer..."
-    if [ "$EUID" -ne 0 ]; then
-        curl -fsSL "$SERVICE_INSTALLER_URL" | sudo bash -s "$API_KEY"
+_run_service_install() {
+  export ANTGAIN_SKIP_CONFIRM=1
+  if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/install-cli-service.sh" ]; then
+    if [ "$EUID" -eq 0 ]; then
+      bash "${_ag_installer_root}/install-cli-service.sh" "$ANTGAIN_API_KEY"
     else
-        curl -fsSL "$SERVICE_INSTALLER_URL" | bash -s "$API_KEY"
+      sudo env ANTGAIN_INSTALLER_DIR="$_ag_installer_root" ANTGAIN_SKIP_CONFIRM=1 \
+        bash "${_ag_installer_root}/install-cli-service.sh" "$ANTGAIN_API_KEY"
     fi
+  else
+    if [ "$EUID" -eq 0 ]; then
+      curl -fsSL "${ANTGAIN_INSTALL_BASE}/install-cli-service.sh" | bash -s -- "$ANTGAIN_API_KEY"
+    else
+      curl -fsSL "${ANTGAIN_INSTALL_BASE}/install-cli-service.sh" | sudo env ANTGAIN_SKIP_CONFIRM=1 bash -s -- "$ANTGAIN_API_KEY"
+    fi
+  fi
+}
+
+if [ -n "${ANTGAIN_API_KEY:-}" ] && [ "${ANTGAIN_SKIP_START:-}" != "1" ] && [ "${ANTGAIN_AUTO_START:-true}" = "true" ]; then
+  ag_log ""
+  ag_print_info "API key provided — installing and starting background service..."
+  _run_service_install
+  ag_print_service_status
+elif [ -n "${ANTGAIN_API_KEY:-}" ] && [ "${ANTGAIN_SKIP_START:-}" = "1" ]; then
+  ag_print_info "Skipped service (ANTGAIN_SKIP_START=1). Run: ANTGAIN_API_KEY=... antgain"
 else
-    echo "Usage:"
-    echo "  antgain --api-key YOUR_API_KEY"
-    echo ""
-    echo "Get your API key from: https://antgain.app/dashboard/settings"
-    echo ""
-    echo "Run as systemd service:"
-    echo "  curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash -s YOUR_API_KEY"
+  ag_log ""
+  ag_log "Next steps:"
+  ag_log "  1. Run:  export ANTGAIN_API_KEY=your-key && antgain"
+  ag_log "  2. Service: curl -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY"
+  ag_log "  3. Uninstall: curl -fsSL ${ANTGAIN_INSTALL_BASE}/uninstall-cli.sh | sudo bash"
+  ag_log ""
+  ag_log "Get your API key: https://antgain.app/dashboard/settings"
 fi

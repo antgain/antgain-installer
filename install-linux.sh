@@ -1,110 +1,68 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# AntGain Linux Installation Script
-# Usage: 
-#   curl -fsSL https://... | sudo bash
-#   curl -fsSL https://... | sudo bash -s 1.0.30
-#   curl -fsSL https://... | sudo VERSION=1.0.30 bash
+# AntGain Desktop installer (Debian/Ubuntu x86_64 .deb)
+#   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
+#   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.0.30
 
-echo "🚀 AntGain Linux Installer"
-echo "================================"
-
-# Configuration
-R2_BASE_URL="${R2_BASE_URL:-https://pub-a6321dc4515447b698de8db2567150ff.r2.dev}"
-
-# Get version from argument or environment variable
-if [ -n "$1" ]; then
-    VERSION="$1"
-elif [ -z "$VERSION" ]; then
-    VERSION=""
-fi
-
-# Detect architecture
-ARCH=$(uname -m)
-if [ "$ARCH" != "x86_64" ]; then
-    echo "❌ Error: Only x86_64 architecture is supported"
-    exit 1
-fi
-
-# Detect distribution
-if ! command -v apt-get &> /dev/null; then
-    echo "❌ Error: Only Debian/Ubuntu-based distributions are supported"
-    exit 1
-fi
-
-# Get version
-if [ -n "$VERSION" ]; then
-    # Use manually specified version
-    echo "📦 Using specified version: v$VERSION"
+_ag_installer_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/lib/common.sh" ]; then
+  # shellcheck disable=SC1091
+  . "${_ag_installer_root}/lib/common.sh"
 else
-    # Get latest version from R2
-    echo "📡 Fetching latest version..."
-    LATEST_JSON="${R2_BASE_URL}/latest.json"
-    
-    VERSION_DATA=$(curl -fsSL "$LATEST_JSON" 2>/dev/null || echo "")
-    
-    if [ -z "$VERSION_DATA" ]; then
-        echo "❌ Unable to fetch latest version from R2"
-        echo ""
-        echo "You can specify version manually to bypass version check:"
-        echo "  curl -fsSL ... | sudo bash -s 1.0.30"
-        echo ""
-        echo "Or check network connection and try again."
-        exit 1
-    fi
-    
-    # Extract version (compatible with JSON formats with or without spaces)
-    VERSION=$(echo "$VERSION_DATA" | grep -o '"version" *: *"[^"]*"' | head -1 | cut -d'"' -f4)
-    if [ -z "$VERSION" ]; then
-        VERSION=$(echo "$VERSION_DATA" | grep -o '"version":"[^"]*' | head -1 | cut -d'"' -f4)
-    fi
-    
-    if [ -z "$VERSION" ]; then
-        echo "❌ Error: Unable to parse version information"
-        exit 1
-    fi
-    
-    echo "📦 Latest version: v$VERSION"
+  _ag_common_tmp="$(mktemp)"
+  curl -fsSL "${ANTGAIN_INSTALL_BASE:-https://install.antgain.app}/lib/common.sh" -o "$_ag_common_tmp"
+  # shellcheck disable=SC1090
+  . "$_ag_common_tmp"
+  rm -f "$_ag_common_tmp"
 fi
 
-# Build download URL
-DEB_FILENAME="AntGain_${VERSION}_linux-x86_64.deb"
-DEB_URL="${R2_BASE_URL}/releases/${VERSION}/${DEB_FILENAME}"
+ag_log "AntGain Desktop Installer (Linux)"
+ag_log "================================"
 
-echo "📥 Download URL: $DEB_URL"
+ag_need_root
 
-# Download
-echo "📥 Downloading..."
-TMP_DEB="/tmp/antgain_${VERSION}.deb"
-if ! curl -fL -o "$TMP_DEB" "$DEB_URL"; then
-    echo "❌ Download failed"
-    exit 1
+ARCH="$(uname -m)"
+if [ "$ARCH" != "x86_64" ]; then
+  ag_print_error "This installer supports Desktop on x86_64 only (detected: $ARCH)"
+  ag_print_info "For CLI on ARM devices use: ${ANTGAIN_INSTALL_BASE}/install-cli.sh"
+  exit 1
 fi
 
-# Update package list
-echo "🔄 Updating package list..."
+if ! command -v apt-get >/dev/null 2>&1; then
+  ag_print_error "Only Debian/Ubuntu-based distributions are supported"
+  exit 1
+fi
+
+TARGET_VERSION="${1:-${VERSION:-}}"
+ag_fetch_desktop_deb_url "${TARGET_VERSION:-}" amd64
+
+ag_print_info "Version: ${DESKTOP_VERSION}"
+ag_print_info "Package: ${DESKTOP_DEB_URL}"
+
+TMP_DEB="$(mktemp /tmp/antgain_XXXXXX.deb)"
+trap 'rm -f "$TMP_DEB"' EXIT
+
+if ! curl -fL# -o "$TMP_DEB" "$DESKTOP_DEB_URL"; then
+  ag_print_error "Download failed"
+  exit 1
+fi
+
+ag_print_info "Updating package index..."
 apt-get update -qq 2>/dev/null || true
 
-# Install
-echo "📦 Installing AntGain..."
-if apt-get install -y "$TMP_DEB"; then
-    echo "✅ Installation successful!"
-    echo ""
-    echo "How to run:"
-    echo "  • Command line: ant-gain"
-    echo "  • App menu: Search for AntGain"
+ag_print_info "Installing package..."
+if DEBIAN_FRONTEND=noninteractive apt-get install -y "$TMP_DEB"; then
+  ag_print_success "AntGain Desktop installed"
 else
-    echo "❌ Installation failed"
-    echo ""
-    echo "Manual installation:"
-    echo "  sudo apt install -f"
-    rm -f "$TMP_DEB"
-    exit 1
+  ag_print_error "Installation failed"
+  ag_log "Try: sudo apt-get install -f && sudo apt install $TMP_DEB"
+  exit 1
 fi
 
-# Cleanup
-rm -f "$TMP_DEB"
-
-echo ""
-echo "🎉 Installation complete!"
+ag_log ""
+ag_log "How to run:"
+ag_log "  Command line: ant-gain"
+ag_log "  App menu:     search for AntGain"
+ag_log ""
+ag_print_success "Installation complete"

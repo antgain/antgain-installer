@@ -1,0 +1,36 @@
+services:
+  antgain:
+    image: pinors/antgain-cli:latest
+    container_name: antgain
+    restart: always
+    environment:
+      # Required: Your API Key (get from https://antgain.app/dashboard/settings)
+      - ANTGAIN_API_KEY=${ANTGAIN_API_KEY}
+
+      # Optional: Log level (default: info)
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+
+      # Optional: API URL (default: https://api.antgain.app)
+      # - ANTGAIN_API_URL=https://api.antgain.app
+
+      # Optional: Node server address (auto-detected if not set)
+      # - NODE_SERVER=107.174.172.30:8443
+    volumes:
+      - antgain-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "antgain --version >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 3600 --cleanup antgain
+
+volumes:
+  antgain-data:
