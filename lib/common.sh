@@ -72,10 +72,8 @@ ag_normalize_version() {
 }
 
 ag_is_version_string() {
-  case "$1" in
-    [vV]?[0-9]*.[0-9]*.[0-9]*) return 0 ;;
-    *) return 1 ;;
-  esac
+  # NOTE: in `case`, '.' is a wildcard — use bash regex instead.
+  [[ "$1" =~ ^[vV]?[0-9]+(\.[0-9]+){1,3}([.+-].*)?$ ]]
 }
 
 ag_detect_platform() {
@@ -112,25 +110,47 @@ ag_detect_platform() {
   export OS_TYPE ARCH_TYPE PLATFORM_KEY
 }
 
+# True when $0 is the shell or install script path (not a user version/api key).
+ag_is_shell_or_script_path() {
+  case "$1" in
+    bash|/bin/bash|dash|/bin/dash|sh|/bin/sh|zsh|ksh|"")
+      return 0
+      ;;
+    *.sh|*/install-cli*|*/cli.sh)
+      return 0
+      ;;
+    /*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+ag_apply_cli_arg() {
+  local arg="$1"
+  [ -z "$arg" ] && return 0
+  if ag_is_version_string "$arg"; then
+    TARGET_VERSION="$(ag_normalize_version "$arg")"
+    return 0
+  fi
+  if [ -z "${ANTGAIN_API_KEY:-}" ]; then
+    ANTGAIN_API_KEY="$arg"
+  fi
+}
+
 ag_parse_cli_args() {
   # Sets: TARGET_VERSION, ANTGAIN_API_KEY
   TARGET_VERSION="${TARGET_VERSION:-${VERSION:-}}"
   ANTGAIN_API_KEY="${ANTGAIN_API_KEY:-}"
 
-  if [ -n "${1:-}" ]; then
-    if ag_is_version_string "$1"; then
-      TARGET_VERSION="$(ag_normalize_version "$1")"
-      if [ -n "${2:-}" ] && ! ag_is_version_string "$2"; then
-        ANTGAIN_API_KEY="$2"
-      fi
-    else
-      ANTGAIN_API_KEY="$1"
-    fi
+  # curl | bash -s 1.1.0  → version is in $0, not $@
+  # curl | bash -s -- 1.1.0  → version is in $1 (preferred)
+  if ! ag_is_shell_or_script_path "$0"; then
+    ag_apply_cli_arg "$0"
   fi
-
-  if [ -n "${2:-}" ] && [ -z "$TARGET_VERSION" ] && ag_is_version_string "$2"; then
-    TARGET_VERSION="$(ag_normalize_version "$2")"
-  fi
+  for arg in "$@"; do
+    ag_apply_cli_arg "$arg"
+  done
 
   export TARGET_VERSION ANTGAIN_API_KEY
 }
@@ -192,6 +212,9 @@ ag_fetch_cli_release() {
 
   if [ -z "$CLI_VERSION" ] || [ -z "$CLI_DOWNLOAD_URL" ]; then
     ag_print_error "Could not resolve release for platform: $platform_key"
+    ag_log "Pin a version explicitly (note the -- after -s):"
+    ag_log "  curl -fsSL ${ANTGAIN_INSTALL_BASE:-https://install.antgain.app}/install-cli.sh | bash -s -- 1.1.0"
+    ag_log "Or set: VERSION=1.1.0 curl ... | bash"
     return 1
   fi
 
@@ -286,29 +309,59 @@ ag_install_cli_binary() {
     return 1
   fi
 
+  ag_macos_prepare_binary "$binary"
+
   ag_print_info "Installing to ${install_dir}/antgain ..."
+  local install_path="${install_dir}/antgain"
   if [ -w "$install_dir" ]; then
-    install -m 0755 "$binary" "${install_dir}/antgain"
+    install -m 0755 "$binary" "$install_path"
   else
-    ag_run_root install -m 0755 "$binary" "${install_dir}/antgain"
+    ag_run_root install -m 0755 "$binary" "$install_path"
   fi
+
+  ag_macos_prepare_binary "$install_path"
 
   rm -rf "$tmp"
   export INSTALLED_CLI_VERSION="$CLI_VERSION"
 }
 
+# Remove macOS quarantine on binaries downloaded from the internet.
+ag_macos_prepare_binary() {
+  local path="$1"
+  [ "$(uname -s)" = "Darwin" ] || return 0
+  [ -f "$path" ] || return 0
+  if ! command -v xattr >/dev/null 2>&1; then
+    return 0
+  fi
+  xattr -d com.apple.quarantine "$path" 2>/dev/null || true
+  xattr -cr "$path" 2>/dev/null || true
+}
+
 ag_verify_cli_binary() {
-  local bin
+  local bin err
   bin="$(command -v antgain 2>/dev/null || true)"
   if [ -z "$bin" ]; then
     ag_print_error "antgain not found in PATH (install dir: $ANTGAIN_INSTALL_DIR)"
+    ag_print_info "Ensure ${ANTGAIN_INSTALL_DIR} is listed in your PATH"
     return 1
   fi
-  if ! "$bin" --version >/dev/null 2>&1; then
+
+  ag_macos_prepare_binary "$bin"
+
+  err="$("$bin" --version 2>&1)" || {
     ag_print_error "antgain is installed but failed to run: $bin"
-    ag_print_info "Try: ldd $bin  (Linux) or check architecture mismatch"
+    if [ -n "$err" ]; then
+      ag_log "Error: $err"
+    fi
+    if [ "$(uname -s)" = "Darwin" ]; then
+      ag_log "On macOS, allow the binary in System Settings → Privacy & Security,"
+      ag_log "or run: xattr -d com.apple.quarantine $bin"
+    else
+      ag_log "Try: ldd $bin  (check for missing libraries / wrong architecture)"
+    fi
     return 1
-  fi
+  }
+
   ag_print_success "Installed: $bin ($("$bin" --version 2>/dev/null | head -1))"
 }
 
