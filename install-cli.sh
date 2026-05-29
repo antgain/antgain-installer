@@ -41,6 +41,9 @@ ag_install_cli_binary "$PLATFORM_KEY" "${TARGET_VERSION:-}" "$ANTGAIN_INSTALL_DI
 
 if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ]; then
   export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
+  if [ -n "${ANTGAIN_API_KEY:-}" ]; then
+    ag_save_user_api_key "$ANTGAIN_API_KEY" 2>/dev/null || true
+  fi
 fi
 
 _verify_ok=true
@@ -75,12 +78,7 @@ _run_service_install() {
 if [ -n "${ANTGAIN_API_KEY:-}" ] && ag_should_install_service; then
   ag_log ""
   if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ] || ! ag_can_elevate; then
-    ag_print_warning "Skipping systemd/service install (user install or sudo unavailable)."
-    ag_log "Start manually:"
-    ag_log "  export ANTGAIN_API_KEY=your-key"
-    ag_log "  export PATH=\"${ANTGAIN_INSTALL_DIR}:\$PATH\""
-    ag_log "  antgain run --daemon"
-    ag_print_linux_manual_start_hints
+    ag_finalize_user_install "$ANTGAIN_API_KEY" || ag_print_linux_manual_start_hints
   elif ag_should_start_service; then
     ag_print_info "API key provided — installing service (boot start + run now)..."
     if ! _run_service_install; then

@@ -111,6 +111,180 @@ ag_print_path_hint() {
   ag_log "Persist in ~/.bashrc, ~/.profile, or ~/.zshrc"
 }
 
+ag_path_persisted_in_file() {
+  local dir="$1"
+  local rc="$2"
+  [ -f "$rc" ] && grep -qF '# antgain-installer PATH' "$rc" 2>/dev/null \
+    && grep -qF "$dir" "$rc" 2>/dev/null
+}
+
+# Add install dir to current shell and shell rc (no prompt).
+ag_ensure_user_path() {
+  local dir="$1"
+  export PATH="${dir}:${PATH:-}"
+
+  local marker='# antgain-installer PATH'
+  local line="export PATH=\"${dir}:\$PATH\""
+  local rc created=false
+
+  for rc in "${HOME}/.profile" "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+    if ag_path_persisted_in_file "$dir" "$rc"; then
+      continue
+    fi
+    if [ -f "$rc" ] || [ "$rc" = "${HOME}/.profile" ]; then
+      touch "$rc" 2>/dev/null || continue
+      printf '\n%s\n%s\n' "$marker" "$line" >>"$rc"
+      created=true
+    fi
+  done
+
+  if [ "$created" = false ] && [ -n "${HOME:-}" ]; then
+    printf '%s\n%s\n' "$marker" "$line" >>"${HOME}/.profile"
+  fi
+}
+
+ag_save_user_api_key() {
+  local api_key="$1"
+  local dir="${HOME}/.antgain"
+  mkdir -p "${dir}/logs"
+  chmod 700 "$dir" 2>/dev/null || true
+
+  if command -v python3 >/dev/null 2>&1; then
+    ANTGAIN_API_KEY="$api_key" python3 - <<'PY'
+import json, os, stat
+from pathlib import Path
+home = Path(os.environ["HOME"])
+cfg_dir = home / ".antgain"
+cfg_dir.mkdir(parents=True, exist_ok=True)
+cfg_path = cfg_dir / "config.json"
+cfg = {}
+if cfg_path.exists():
+    try:
+        cfg = json.loads(cfg_path.read_text())
+    except json.JSONDecodeError:
+        cfg = {}
+cfg["api_key"] = os.environ["ANTGAIN_API_KEY"]
+cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
+os.chmod(cfg_path, stat.S_IRUSR | stat.S_IWUSR)
+PY
+    return 0
+  fi
+
+  umask 077
+  printf '{"api_key":"%s"}\n' "$(printf '%s' "$api_key" | sed 's/\\/\\\\/g; s/"/\\"/g')" >"${dir}/config.json"
+}
+
+ag_antgain_bin() {
+  if [ -x "${ANTGAIN_INSTALL_DIR}/antgain" ]; then
+    printf '%s' "${ANTGAIN_INSTALL_DIR}/antgain"
+  else
+    command -v antgain 2>/dev/null || true
+  fi
+}
+
+ag_start_user_daemon() {
+  local bin api_key
+  bin="$(ag_antgain_bin)"
+  api_key="${ANTGAIN_API_KEY:-}"
+  [ -n "$bin" ] && [ -x "$bin" ] || return 1
+  [ -n "$api_key" ] || return 1
+
+  export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
+  export ANTGAIN_API_KEY="$api_key"
+
+  "$bin" stop >/dev/null 2>&1 || true
+  sleep 1
+  if "$bin" run --daemon >/dev/null 2>&1; then
+    return 0
+  fi
+  # Some builds print to stdout; still succeed if process exists
+  sleep 2
+  pgrep -f '[a]ntgain' >/dev/null 2>&1
+}
+
+ag_install_user_systemd_unit() {
+  [ "${OS_TYPE:-}" = "linux" ] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  [ -n "${ANTGAIN_API_KEY:-}" ] || return 1
+
+  local bin unit_dir unit env_file
+  bin="$(ag_antgain_bin)"
+  [ -n "$bin" ] || return 1
+
+  unit_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+  unit="${unit_dir}/antgain.service"
+  env_file="${HOME}/.antgain/env"
+  mkdir -p "$unit_dir" "${HOME}/.antgain"
+  umask 077
+  printf 'ANTGAIN_API_KEY=%s\n' "$ANTGAIN_API_KEY" >"$env_file"
+  chmod 600 "$env_file" 2>/dev/null || true
+
+  cat >"$unit" <<EOF
+[Unit]
+Description=AntGain Node (user)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-${env_file}
+ExecStart=${bin} run
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload 2>/dev/null || return 1
+  systemctl --user enable antgain.service 2>/dev/null || return 1
+  if ag_should_start_service; then
+    systemctl --user start antgain.service 2>/dev/null || return 1
+  fi
+  return 0
+}
+
+ag_install_user_crontab_reboot() {
+  [ "${OS_TYPE:-}" = "linux" ] || return 1
+  command -v crontab >/dev/null 2>&1 || return 1
+  local bin marker line
+  bin="$(ag_antgain_bin)"
+  [ -n "$bin" ] || return 1
+  marker='# antgain-installer @reboot'
+  line="@reboot sleep 30 && ANTGAIN_API_KEY='${ANTGAIN_API_KEY}' PATH='${ANTGAIN_INSTALL_DIR}:\$PATH' '${bin}' run --daemon >/dev/null 2>&1"
+
+  ( crontab -l 2>/dev/null | grep -vF "$marker" | grep -vF 'antgain run --daemon'; echo "$marker"; echo "$line" ) | crontab - 2>/dev/null
+}
+
+# User-level install: PATH, credentials, start node, optional boot (no sudo).
+ag_finalize_user_install() {
+  local api_key="$1"
+  [ -n "$api_key" ] || return 1
+
+  ag_ensure_user_path "$ANTGAIN_INSTALL_DIR"
+  ag_save_user_api_key "$api_key"
+
+  if ! ag_should_start_service; then
+    ag_print_info "Node not started (ANTGAIN_AUTO_START=false). Run: antgain run --daemon"
+    return 0
+  fi
+
+  if ag_install_user_systemd_unit 2>/dev/null; then
+    ag_print_success "Node service enabled for this user (systemd --user)"
+    return 0
+  fi
+
+  if ag_start_user_daemon; then
+    ag_print_success "Node started in background"
+    if ag_should_enable_on_boot; then
+      ag_install_user_crontab_reboot 2>/dev/null || true
+    fi
+    return 0
+  fi
+
+  ag_print_warning "Could not start node automatically; run: antgain run --daemon"
+  return 1
+}
+
 ag_install_binary_to_dir() {
   local binary="$1"
   local install_dir="$2"
@@ -413,8 +587,7 @@ ag_install_cli_binary() {
     local user_dir
     user_dir="$(ag_user_install_dir)"
     if [ "$install_dir" != "$user_dir" ]; then
-      ag_print_warning "Cannot install to ${install_dir} (permission denied or sudo unavailable)"
-      ag_print_info "Installing to ${user_dir}/antgain instead..."
+      ag_print_info "Installing to ${user_dir}/antgain (no sudo for ${install_dir})"
       if ! ag_install_binary_to_dir "$binary" "$user_dir"; then
         ag_print_error "Failed to install antgain to ${user_dir}"
         rm -rf "$tmp"
@@ -425,7 +598,7 @@ ag_install_cli_binary() {
       export ANTGAIN_INSTALL_DIR
       ANTGAIN_USER_INSTALL=1
       export ANTGAIN_USER_INSTALL
-      ag_print_path_hint "$install_dir"
+      ag_ensure_user_path "$install_dir"
     else
       ag_print_error "Failed to install antgain to ${install_dir}"
       rm -rf "$tmp"
@@ -456,15 +629,25 @@ ag_verify_cli_binary() {
   bin="$(command -v antgain 2>/dev/null || true)"
   if [ -z "$bin" ] && [ -x "${ANTGAIN_INSTALL_DIR}/antgain" ]; then
     bin="${ANTGAIN_INSTALL_DIR}/antgain"
-    ag_print_warning "antgain is installed but not in PATH yet"
-    ag_print_path_hint "$ANTGAIN_INSTALL_DIR"
-    export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
+    if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ]; then
+      ag_ensure_user_path "$ANTGAIN_INSTALL_DIR"
+    else
+      ag_print_warning "antgain is installed but not in PATH yet"
+      ag_print_path_hint "$ANTGAIN_INSTALL_DIR"
+      export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
+    fi
   fi
   if [ -z "$bin" ]; then
     ag_print_error "antgain not found in PATH (install dir: $ANTGAIN_INSTALL_DIR)"
-    ag_print_path_hint "$ANTGAIN_INSTALL_DIR"
-    return 1
+    if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ]; then
+      ag_ensure_user_path "$ANTGAIN_INSTALL_DIR"
+      bin="${ANTGAIN_INSTALL_DIR}/antgain"
+    else
+      ag_print_path_hint "$ANTGAIN_INSTALL_DIR"
+      return 1
+    fi
   fi
+  [ -n "$bin" ] || return 1
 
   ag_macos_prepare_binary "$bin"
 
