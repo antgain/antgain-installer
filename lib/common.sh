@@ -192,33 +192,33 @@ ag_validate_cli_install_args() {
   return 0
 }
 
-ag_json_cli_platform() {
+ag_json_cli_version() {
   local json="$1"
-  local key="$2"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$json" | python3 -c '
 import json, sys
-key = sys.argv[1]
 data = json.loads(sys.stdin.read())
-version = str(data.get("version", "")).lstrip("vV")
-url = data.get("downloads", {}).get("cli", {}).get("files", {}).get(key, {}).get("url", "")
-print(version)
-print(url)
-' "$key"
+print(str(data.get("version", "")).lstrip("vV"))
+'
     return 0
   fi
   if command -v jq >/dev/null 2>&1; then
-    local version url
-    version="$(printf '%s' "$json" | jq -r '.version // empty' | sed 's/^[vV]//')"
-    url="$(printf '%s' "$json" | jq -r --arg k "$key" '.downloads.cli.files[$k].url // empty')"
-    printf '%s\n%s' "$version" "$url"
+    printf '%s' "$json" | jq -r '.version // empty' | sed 's/^[vV]//'
     return 0
   fi
-  local version url
+  local version
   version="$(printf '%s' "$json" | tr -d '\n' | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
-  version="$(ag_normalize_version "$version")"
-  url="$(printf '%s' "$json" | tr -d '\n' | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*{[^}]*}" | grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)"
-  printf '%s\n%s' "$version" "$url"
+  ag_normalize_version "$version"
+}
+
+ag_cli_release_download_url() {
+  local platform_key="$1"
+  local version="$2"
+  local base="${ANTGAIN_R2_BASE_URL%/}"
+  printf '%s/cli/releases/%s/antgain-%s.tar.gz' \
+    "$base" \
+    "$(ag_normalize_version "$version")" \
+    "$platform_key"
 }
 
 ag_fetch_cli_release() {
@@ -235,7 +235,7 @@ ag_fetch_cli_release() {
   fi
 
   ag_print_info "Fetching latest CLI version..."
-  local json url parsed
+  local json
   json="$(curl -fsSL "${ANTGAIN_R2_BASE_URL}/cli/latest.json" 2>/dev/null || true)"
   if [ -z "$json" ]; then
     ag_print_error "Failed to fetch ${ANTGAIN_R2_BASE_URL}/cli/latest.json"
@@ -243,11 +243,9 @@ ag_fetch_cli_release() {
     return 1
   fi
 
-  parsed="$(ag_json_cli_platform "$json" "$platform_key")"
-  CLI_VERSION="$(printf '%s' "$parsed" | sed -n '1p')"
-  CLI_DOWNLOAD_URL="$(printf '%s' "$parsed" | sed -n '2p')"
+  CLI_VERSION="$(ag_json_cli_version "$json")"
 
-  if [ -z "$CLI_VERSION" ] || [ -z "$CLI_DOWNLOAD_URL" ]; then
+  if [ -z "$CLI_VERSION" ]; then
     ag_print_error "Could not resolve release for platform: $platform_key"
     ag_log "Pin a version explicitly (note the -- after -s):"
     ag_log "  curl -fsSL ${ANTGAIN_INSTALL_BASE:-https://install.antgain.app}/install-cli.sh | bash -s -- 1.1.0"
@@ -256,7 +254,8 @@ ag_fetch_cli_release() {
   fi
 
   CLI_VERSION="$(ag_normalize_version "$CLI_VERSION")"
-  CLI_ARCHIVE="${CLI_DOWNLOAD_URL##*/}"
+  CLI_ARCHIVE="antgain-${platform_key}.tar.gz"
+  CLI_DOWNLOAD_URL="$(ag_cli_release_download_url "$platform_key" "$CLI_VERSION")"
   CLI_CHECKSUM_URL="${CLI_DOWNLOAD_URL}.sha256"
   export CLI_VERSION CLI_DOWNLOAD_URL CLI_CHECKSUM_URL CLI_ARCHIVE
 }
