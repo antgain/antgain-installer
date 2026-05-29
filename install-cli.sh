@@ -39,6 +39,10 @@ ag_log "System: ${OS_TYPE}/${ARCH_TYPE} (${PLATFORM_KEY})"
 
 ag_install_cli_binary "$PLATFORM_KEY" "${TARGET_VERSION:-}" "$ANTGAIN_INSTALL_DIR"
 
+if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ]; then
+  export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
+fi
+
 _verify_ok=true
 if ! ag_verify_cli_binary; then
   _verify_ok=false
@@ -70,16 +74,29 @@ _run_service_install() {
 
 if [ -n "${ANTGAIN_API_KEY:-}" ] && ag_should_install_service; then
   ag_log ""
-  if ag_should_start_service; then
+  if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ] || ! ag_can_elevate; then
+    ag_print_warning "Skipping systemd/service install (user install or sudo unavailable)."
+    ag_log "Start manually:"
+    ag_log "  export ANTGAIN_API_KEY=your-key"
+    ag_log "  export PATH=\"${ANTGAIN_INSTALL_DIR}:\$PATH\""
+    ag_log "  antgain run --daemon"
+    ag_print_linux_manual_start_hints
+  elif ag_should_start_service; then
     ag_print_info "API key provided — installing service (boot start + run now)..."
+    if ! _run_service_install; then
+      ag_print_warning "Background service setup did not complete; CLI binary is installed."
+      ag_print_linux_manual_start_hints
+    else
+      ag_print_service_status
+    fi
   else
     ag_print_info "API key provided — installing service (boot start enabled, run now skipped)..."
-  fi
-  if ! _run_service_install; then
-    ag_print_warning "Background service setup did not complete; CLI binary is installed."
-    ag_print_linux_manual_start_hints
-  else
-    ag_print_service_status
+    if ! _run_service_install; then
+      ag_print_warning "Background service setup did not complete; CLI binary is installed."
+      ag_print_linux_manual_start_hints
+    else
+      ag_print_service_status
+    fi
   fi
 elif [ -n "${ANTGAIN_API_KEY:-}" ] && ! ag_should_install_service; then
   ag_print_info "Skipped service install (ANTGAIN_SKIP_START). Run: curl -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY"

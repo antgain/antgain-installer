@@ -79,6 +79,67 @@ ag_run_root() {
   fi
 }
 
+ag_user_install_dir() {
+  printf '%s/.local/bin' "${HOME:-/tmp}"
+}
+
+# True when install can use root (already root, or sudo works).
+ag_can_elevate() {
+  [ "$EUID" -eq 0 ] && return 0
+  command -v sudo >/dev/null 2>&1 || return 1
+  if sudo -n true 2>/dev/null; then
+    return 0
+  fi
+  ag_is_tty || return 1
+  sudo -v 2>/dev/null
+}
+
+ag_path_contains_dir() {
+  local dir="$1"
+  case ":${PATH:-}:" in
+    *":${dir}:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ag_print_path_hint() {
+  local dir="$1"
+  if ag_path_contains_dir "$dir"; then
+    return 0
+  fi
+  ag_print_warning "Add to PATH: export PATH=\"${dir}:\$PATH\""
+  ag_log "Persist in ~/.bashrc, ~/.profile, or ~/.zshrc"
+}
+
+ag_install_binary_to_dir() {
+  local binary="$1"
+  local install_dir="$2"
+  local install_path="${install_dir}/antgain"
+
+  if ! mkdir -p "$install_dir" 2>/dev/null; then
+    if [ "$EUID" -eq 0 ]; then
+      mkdir -p "$install_dir"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo mkdir -p "$install_dir" 2>/dev/null || return 1
+    else
+      return 1
+    fi
+  fi
+
+  if [ -w "$install_dir" ]; then
+    install -m 0755 "$binary" "$install_path"
+    return 0
+  fi
+  if [ "$EUID" -eq 0 ]; then
+    install -m 0755 "$binary" "$install_path"
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo install -m 0755 "$binary" "$install_path" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
 ag_need_root() {
   if [ "$EUID" -ne 0 ]; then
     ag_print_error "Please run as root (use sudo)"
@@ -348,14 +409,31 @@ ag_install_cli_binary() {
   ag_macos_prepare_binary "$binary"
 
   ag_print_info "Installing to ${install_dir}/antgain ..."
-  local install_path="${install_dir}/antgain"
-  if [ -w "$install_dir" ]; then
-    install -m 0755 "$binary" "$install_path"
-  else
-    ag_run_root install -m 0755 "$binary" "$install_path"
+  if ! ag_install_binary_to_dir "$binary" "$install_dir"; then
+    local user_dir
+    user_dir="$(ag_user_install_dir)"
+    if [ "$install_dir" != "$user_dir" ]; then
+      ag_print_warning "Cannot install to ${install_dir} (permission denied or sudo unavailable)"
+      ag_print_info "Installing to ${user_dir}/antgain instead..."
+      if ! ag_install_binary_to_dir "$binary" "$user_dir"; then
+        ag_print_error "Failed to install antgain to ${user_dir}"
+        rm -rf "$tmp"
+        return 1
+      fi
+      install_dir="$user_dir"
+      ANTGAIN_INSTALL_DIR="$install_dir"
+      export ANTGAIN_INSTALL_DIR
+      ANTGAIN_USER_INSTALL=1
+      export ANTGAIN_USER_INSTALL
+      ag_print_path_hint "$install_dir"
+    else
+      ag_print_error "Failed to install antgain to ${install_dir}"
+      rm -rf "$tmp"
+      return 1
+    fi
   fi
 
-  ag_macos_prepare_binary "$install_path"
+  ag_macos_prepare_binary "${install_dir}/antgain"
 
   rm -rf "$tmp"
   export INSTALLED_CLI_VERSION="$CLI_VERSION"
@@ -376,9 +454,15 @@ ag_macos_prepare_binary() {
 ag_verify_cli_binary() {
   local bin err
   bin="$(command -v antgain 2>/dev/null || true)"
+  if [ -z "$bin" ] && [ -x "${ANTGAIN_INSTALL_DIR}/antgain" ]; then
+    bin="${ANTGAIN_INSTALL_DIR}/antgain"
+    ag_print_warning "antgain is installed but not in PATH yet"
+    ag_print_path_hint "$ANTGAIN_INSTALL_DIR"
+    export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
+  fi
   if [ -z "$bin" ]; then
     ag_print_error "antgain not found in PATH (install dir: $ANTGAIN_INSTALL_DIR)"
-    ag_print_info "Ensure ${ANTGAIN_INSTALL_DIR} is listed in your PATH"
+    ag_print_path_hint "$ANTGAIN_INSTALL_DIR"
     return 1
   fi
 

@@ -33,6 +33,7 @@ Use `bash -s --` before the version and API key.
 | Binary only (no service) | `ANTGAIN_SKIP_START=1` with the install script |
 | Install service later | `curl -fsSL https://install.antgain.app/install-cli-service.sh \| sudo bash -s -- YOUR_API_KEY` |
 | Custom install path | `ANTGAIN_INSTALL_DIR=$HOME/.local/bin` |
+| No working `sudo` | Installer falls back to `~/.local/bin` and prints `export PATH=...` |
 
 | Variable | Effect |
 |----------|--------|
