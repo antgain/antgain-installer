@@ -82,15 +82,81 @@ docker compose logs -f
 
 ## Recreate or upgrade (same node)
 
-Stop and remove the container, then start again with the **same** `.env` — do not change `ANTGAIN_DEVICE_ID`.
+Keep the **same** `ANTGAIN_DEVICE_ID` for this node. Do not generate a new UUID on upgrade.
+
+### Docker Compose
+
+Pull the latest image for your tag, then recreate the service:
 
 ```bash
-docker compose down
 docker compose pull
 docker compose up -d
 ```
 
+You can use `docker compose down` first if you prefer a full teardown; `up -d` alone is enough when only the image changed.
+
+### `docker run` — one-line upgrade script
+
+If the container was created with `docker run` (not Compose), use the upgrade script. It pulls the latest image for the **same tag** (e.g. `:latest`), copies environment variables and run options from the old container, starts a new container with the same name, and keeps the old one as a backup. If the new container fails to start, it rolls back automatically.
+
+```bash
+curl -fsSL https://install.antgain.app/docker-update.sh | bash -s -- antgain-node
+```
+
+Replace `antgain-node` with your container name.
+
+**What the script does**
+
+1. Export env vars from the running container (including `ANTGAIN_API_KEY` and `ANTGAIN_DEVICE_ID`)
+2. `docker pull` for the image tag the container already uses
+3. Stop the old container and rename it to `<name>_backup_<timestamp>`
+4. Start a new container with the same name and configuration
+5. Check that it is running; on failure, restore the backup
+
+**After a successful upgrade**
+
+Confirm the node is healthy, then remove the backup container:
+
+```bash
+docker exec -it antgain-node antgain status
+docker rm antgain-node_backup_YYYYMMDD_HHMMSS
+```
+
+**Manual rollback** (if you need to revert after confirming the upgrade):
+
+```bash
+docker stop antgain-node
+docker rm antgain-node
+docker rename antgain-node_backup_YYYYMMDD_HHMMSS antgain-node
+docker start antgain-node
+```
+
+**Notes**
+
+| Topic | Detail |
+|-------|--------|
+| Scope | For containers created with `docker run`. Use Compose commands above for Compose-managed services. |
+| Image tag | Upgrades the tag already on the container (e.g. `pinors/antgain-cli:latest`). To pin a version, recreate with an explicit tag. |
+| Custom setup | Works best for the default AntGain layout (`--env-file`, `--restart`, simple mounts). Unusual `docker run` flags may not be copied. |
+| Dependencies | Requires `docker` and `jq` (the script tries to install `jq` on apt/yum/dnf systems when run as root). |
+
+### `docker run` — manual recreate
+
+Stop and remove the container, then start again with the **same** `.env` file:
+
+```bash
+docker pull pinors/antgain-cli:latest
+docker stop antgain-node
+docker rm antgain-node
+docker run -d \
+  --name antgain-node \
+  --restart unless-stopped \
+  --env-file .env \
+  pinors/antgain-cli:latest
+```
+
 ---
+
 
 ## Multiple nodes on one host
 
@@ -127,6 +193,8 @@ CLI command reference: [commands.md](commands.md).
 **Two containers conflict** — duplicate `ANTGAIN_DEVICE_ID`. Give each container its own UUID.
 
 **Missing `ANTGAIN_DEVICE_ID`** — Docker nodes must set it; the process will not start without a valid UUID.
+
+**Upgrade script failed or rolled back** — Check `docker logs antgain-node`. The backup container (`<name>_backup_<timestamp>`) is still on the host; use the manual rollback steps in [Recreate or upgrade](#recreate-or-upgrade-same-node) if needed.
 
 ---
 
