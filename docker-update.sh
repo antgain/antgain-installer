@@ -1,6 +1,94 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+TOTAL_STEPS=4
+BAR_WIDTH=30
+ANIM_PID=""
+
+render_bar() {
+  local pct="$1"
+  local filled=$(( pct * BAR_WIDTH / 100 ))
+  local empty=$(( BAR_WIDTH - filled ))
+  local i
+
+  printf '\r  ['
+  for ((i = 0; i < filled; i++)); do printf '█'; done
+  for ((i = 0; i < empty; i++)); do printf '░'; done
+  printf '] %3d%%' "$pct" >&2
+}
+
+progress_finish() {
+  if [ -t 2 ]; then
+    printf '\n' >&2
+  fi
+}
+
+stop_bar_animation() {
+  if [ -n "$ANIM_PID" ]; then
+    kill "$ANIM_PID" 2>/dev/null || true
+    wait "$ANIM_PID" 2>/dev/null || true
+    ANIM_PID=""
+  fi
+}
+
+run_step() {
+  local step="$1"
+  local start_pct end_pct pct
+  shift
+
+  start_pct=$(( (step - 1) * 100 / TOTAL_STEPS ))
+  end_pct=$(( step * 100 / TOTAL_STEPS ))
+
+  if [ ! -t 2 ]; then
+    if "$@"; then
+      printf '[%s/%s]\n' "$step" "$TOTAL_STEPS"
+      return 0
+    fi
+    return $?
+  fi
+
+  pct=$start_pct
+  (
+    while true; do
+      render_bar "$pct"
+      if [ "$pct" -lt "$end_pct" ]; then
+        pct=$((pct + 1))
+      fi
+      sleep 0.08
+    done
+  ) &
+  ANIM_PID=$!
+
+  if "$@"; then
+    local rc=0
+  else
+    local rc=$?
+  fi
+
+  stop_bar_animation
+  render_bar "$end_pct"
+  return "$rc"
+}
+
+fail() {
+  stop_bar_animation
+  progress_finish
+  printf 'Error: %s\n' "$*" >&2
+}
+
+rollback_container() {
+  fail "$1"
+  printf 'Rolling back...\n'
+  docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker rename "$BACKUP_NAME" "$CONTAINER_NAME"
+  docker start "$CONTAINER_NAME" >/dev/null
+  printf 'Rolled back to %s\n' "$CONTAINER_NAME"
+}
+
+say() {
+  printf '%s\n' "$*"
+}
+
 CONTAINER_NAME="${1:-}"
 
 if [ -z "$CONTAINER_NAME" ]; then
@@ -18,16 +106,14 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
-  echo "jq is not installed. Installing jq..."
-
   if command -v apt >/dev/null 2>&1; then
-    apt update && apt install -y jq
+    apt update >/dev/null && apt install -y jq >/dev/null
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y jq
+    yum install -y jq >/dev/null
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y jq
+    dnf install -y jq >/dev/null
   else
-    echo "Error: cannot install jq automatically. Please install jq manually."
+    fail "cannot install jq automatically; please install jq manually"
     exit 1
   fi
 fi
@@ -42,188 +128,142 @@ BACKUP_NAME="${CONTAINER_NAME}_backup_$(date +%Y%m%d_%H%M%S)"
 TMP_DIR="/tmp/docker-upgrade-${CONTAINER_NAME}-$$"
 ENV_FILE="$TMP_DIR/env.list"
 
+read_container_config() {
+  docker inspect "$CONTAINER_NAME" \
+    --format='{{range .Config.Env}}{{println .}}{{end}}' > "$ENV_FILE"
+
+  PORT_ARGS="$(docker inspect "$CONTAINER_NAME" | jq -r '
+    .[0].HostConfig.PortBindings // {}
+    | to_entries[]?
+    | .key as $containerPort
+    | .value[]?
+    | if .HostIp == "" or .HostIp == "0.0.0.0" then
+        "-p \(.HostPort):\($containerPort)"
+      else
+        "-p \(.HostIp):\(.HostPort):\($containerPort)"
+      end
+  ')"
+
+  MOUNT_ARGS="$(docker inspect "$CONTAINER_NAME" | jq -r '
+    .[0].Mounts[]?
+    | if .Type == "bind" then
+        "-v \(.Source):\(.Destination)\(if .RW then "" else ":ro" end)"
+      elif .Type == "volume" then
+        "-v \(.Name):\(.Destination)\(if .RW then "" else ":ro" end)"
+      else
+        empty
+      end
+  ')"
+
+  NETWORK_MODE="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.NetworkMode}}')"
+  NETWORK_ARGS=""
+  if [ "$NETWORK_MODE" != "default" ] && [ "$NETWORK_MODE" != "bridge" ]; then
+    NETWORK_ARGS="--network $NETWORK_MODE"
+  fi
+
+  RESTART_NAME="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.RestartPolicy.Name}}')"
+  RESTART_MAX="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+  RESTART_ARGS=""
+  if [ "$RESTART_NAME" != "no" ] && [ -n "$RESTART_NAME" ]; then
+    if [ "$RESTART_NAME" = "on-failure" ] && [ "$RESTART_MAX" != "0" ]; then
+      RESTART_ARGS="--restart ${RESTART_NAME}:${RESTART_MAX}"
+    else
+      RESTART_ARGS="--restart ${RESTART_NAME}"
+    fi
+  fi
+
+  PRIVILEGED="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.Privileged}}')"
+  PRIVILEGED_ARGS=""
+  if [ "$PRIVILEGED" = "true" ]; then
+    PRIVILEGED_ARGS="--privileged"
+  fi
+
+  EXTRA_HOST_ARGS="$(docker inspect "$CONTAINER_NAME" | jq -r '
+    .[0].HostConfig.ExtraHosts[]? | "--add-host " + .
+  ')"
+
+  WORKDIR="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.WorkingDir}}')"
+  WORKDIR_ARGS=""
+  if [ -n "$WORKDIR" ]; then
+    WORKDIR_ARGS="-w $WORKDIR"
+  fi
+
+  USER_NAME="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.User}}')"
+  USER_ARGS=""
+  if [ -n "$USER_NAME" ]; then
+    USER_ARGS="-u $USER_NAME"
+  fi
+
+  HOSTNAME_VALUE="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Hostname}}')"
+  HOSTNAME_ARGS=""
+  if [ -n "$HOSTNAME_VALUE" ]; then
+    HOSTNAME_ARGS="--hostname $HOSTNAME_VALUE"
+  fi
+
+  ENTRYPOINT_JSON="$(docker inspect "$CONTAINER_NAME" | jq -c '.[0].Config.Entrypoint')"
+  ENTRYPOINT_ARGS=""
+  if [ "$ENTRYPOINT_JSON" != "null" ]; then
+    ENTRYPOINT_VALUE="$(echo "$ENTRYPOINT_JSON" | jq -r 'join(" ")')"
+    if [ -n "$ENTRYPOINT_VALUE" ]; then
+      ENTRYPOINT_ARGS="--entrypoint \"$ENTRYPOINT_VALUE\""
+    fi
+  fi
+
+  CMD_JSON="$(docker inspect "$CONTAINER_NAME" | jq -c '.[0].Config.Cmd')"
+  CMD_VALUE=""
+  if [ "$CMD_JSON" != "null" ]; then
+    CMD_VALUE="$(echo "$CMD_JSON" | jq -r 'join(" ")')"
+  fi
+}
+
+replace_container() {
+  docker stop "$CONTAINER_NAME" >/dev/null
+  docker rename "$CONTAINER_NAME" "$BACKUP_NAME"
+
+  RUN_CMD="docker run -d \
+    --name \"$CONTAINER_NAME\" \
+    --env-file \"$ENV_FILE\" \
+    $RESTART_ARGS \
+    $NETWORK_ARGS \
+    $PRIVILEGED_ARGS \
+    $WORKDIR_ARGS \
+    $USER_ARGS \
+    $HOSTNAME_ARGS \
+    $PORT_ARGS \
+    $MOUNT_ARGS \
+    $EXTRA_HOST_ARGS \
+    $ENTRYPOINT_ARGS \
+    \"$IMAGE\" \
+    $CMD_VALUE"
+
+  eval "$RUN_CMD" >/dev/null
+}
+
+verify_container() {
+  sleep 5
+  docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"
+}
+
 mkdir -p "$TMP_DIR"
 
-echo "========================================"
-echo "Container upgrade started"
-echo "========================================"
-echo "Container name : $CONTAINER_NAME"
-echo "Image          : $IMAGE"
-echo "Backup name    : $BACKUP_NAME"
-echo "========================================"
-echo
-
-echo "1. Exporting environment variables..."
-docker inspect "$CONTAINER_NAME" \
-  --format='{{range .Config.Env}}{{println .}}{{end}}' > "$ENV_FILE"
-
-echo "2. Pulling latest image for the original image tag..."
-docker pull "$IMAGE"
-
-echo "3. Reading old container configuration..."
-
-PORT_ARGS="$(docker inspect "$CONTAINER_NAME" | jq -r '
-  .[0].HostConfig.PortBindings // {}
-  | to_entries[]?
-  | .key as $containerPort
-  | .value[]?
-  | if .HostIp == "" or .HostIp == "0.0.0.0" then
-      "-p \(.HostPort):\($containerPort)"
-    else
-      "-p \(.HostIp):\(.HostPort):\($containerPort)"
-    end
-')"
-
-MOUNT_ARGS="$(docker inspect "$CONTAINER_NAME" | jq -r '
-  .[0].Mounts[]?
-  | if .Type == "bind" then
-      "-v \(.Source):\(.Destination)\(if .RW then "" else ":ro" end)"
-    elif .Type == "volume" then
-      "-v \(.Name):\(.Destination)\(if .RW then "" else ":ro" end)"
-    else
-      empty
-    end
-')"
-
-NETWORK_MODE="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.NetworkMode}}')"
-NETWORK_ARGS=""
-if [ "$NETWORK_MODE" != "default" ] && [ "$NETWORK_MODE" != "bridge" ]; then
-  NETWORK_ARGS="--network $NETWORK_MODE"
+say "Updating $CONTAINER_NAME..."
+if [ -t 2 ]; then
+  render_bar 0
 fi
 
-RESTART_NAME="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.RestartPolicy.Name}}')"
-RESTART_MAX="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
-RESTART_ARGS=""
-if [ "$RESTART_NAME" != "no" ] && [ -n "$RESTART_NAME" ]; then
-  if [ "$RESTART_NAME" = "on-failure" ] && [ "$RESTART_MAX" != "0" ]; then
-    RESTART_ARGS="--restart ${RESTART_NAME}:${RESTART_MAX}"
-  else
-    RESTART_ARGS="--restart ${RESTART_NAME}"
-  fi
-fi
+run_step 1 docker pull -q "$IMAGE"
+run_step 2 read_container_config
 
-PRIVILEGED="$(docker inspect "$CONTAINER_NAME" --format '{{.HostConfig.Privileged}}')"
-PRIVILEGED_ARGS=""
-if [ "$PRIVILEGED" = "true" ]; then
-  PRIVILEGED_ARGS="--privileged"
-fi
-
-EXTRA_HOST_ARGS="$(docker inspect "$CONTAINER_NAME" | jq -r '
-  .[0].HostConfig.ExtraHosts[]? | "--add-host " + .
-')"
-
-WORKDIR="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.WorkingDir}}')"
-WORKDIR_ARGS=""
-if [ -n "$WORKDIR" ]; then
-  WORKDIR_ARGS="-w $WORKDIR"
-fi
-
-USER_NAME="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.User}}')"
-USER_ARGS=""
-if [ -n "$USER_NAME" ]; then
-  USER_ARGS="-u $USER_NAME"
-fi
-
-HOSTNAME_VALUE="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Hostname}}')"
-HOSTNAME_ARGS=""
-if [ -n "$HOSTNAME_VALUE" ]; then
-  HOSTNAME_ARGS="--hostname $HOSTNAME_VALUE"
-fi
-
-ENTRYPOINT_JSON="$(docker inspect "$CONTAINER_NAME" | jq -c '.[0].Config.Entrypoint')"
-ENTRYPOINT_ARGS=""
-if [ "$ENTRYPOINT_JSON" != "null" ]; then
-  ENTRYPOINT_VALUE="$(echo "$ENTRYPOINT_JSON" | jq -r 'join(" ")')"
-  if [ -n "$ENTRYPOINT_VALUE" ]; then
-    ENTRYPOINT_ARGS="--entrypoint \"$ENTRYPOINT_VALUE\""
-  fi
-fi
-
-CMD_JSON="$(docker inspect "$CONTAINER_NAME" | jq -c '.[0].Config.Cmd')"
-CMD_VALUE=""
-if [ "$CMD_JSON" != "null" ]; then
-  CMD_VALUE="$(echo "$CMD_JSON" | jq -r 'join(" ")')"
-fi
-
-echo "4. Stopping old container..."
-docker stop "$CONTAINER_NAME"
-
-echo "5. Renaming old container to backup..."
-docker rename "$CONTAINER_NAME" "$BACKUP_NAME"
-
-echo "6. Starting new container with the same original name..."
-
-RUN_CMD="docker run -d \
-  --name \"$CONTAINER_NAME\" \
-  --env-file \"$ENV_FILE\" \
-  $RESTART_ARGS \
-  $NETWORK_ARGS \
-  $PRIVILEGED_ARGS \
-  $WORKDIR_ARGS \
-  $USER_ARGS \
-  $HOSTNAME_ARGS \
-  $PORT_ARGS \
-  $MOUNT_ARGS \
-  $EXTRA_HOST_ARGS \
-  $ENTRYPOINT_ARGS \
-  \"$IMAGE\" \
-  $CMD_VALUE"
-
-echo "$RUN_CMD"
-echo
-
-if ! eval "$RUN_CMD"; then
-  echo
-  echo "Error: failed to start the new container."
-  echo "Rolling back..."
-
-  docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  docker rename "$BACKUP_NAME" "$CONTAINER_NAME"
-  docker start "$CONTAINER_NAME"
-
-  echo "Rollback completed."
+if ! run_step 3 replace_container; then
+  rollback_container "failed to start the new container"
   exit 1
 fi
 
-echo
-echo "7. Checking new container status..."
-sleep 5
-
-if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" | grep -q "$CONTAINER_NAME"; then
-  echo
-  echo "Error: new container is not running."
-  echo "Rolling back..."
-
-  docker logs --tail 100 "$CONTAINER_NAME" || true
-
-  docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  docker rename "$BACKUP_NAME" "$CONTAINER_NAME"
-  docker start "$CONTAINER_NAME"
-
-  echo "Rollback completed."
+if ! run_step 4 verify_container; then
+  docker logs --tail 30 "$CONTAINER_NAME" 2>&1 || true
+  rollback_container "upgrade verification failed"
   exit 1
 fi
 
-echo
-echo "8. Recent logs:"
-docker logs --tail 50 "$CONTAINER_NAME" || true
-
-echo
-echo "========================================"
-echo "Upgrade completed successfully."
-echo "========================================"
-echo "Container name : $CONTAINER_NAME"
-echo "Image          : $IMAGE"
-echo "Backup         : $BACKUP_NAME"
-echo
-echo "The new container is running with the same original name:"
-echo "  $CONTAINER_NAME"
-echo
-echo "After confirming everything works, you can remove the backup container:"
-echo "  docker rm $BACKUP_NAME"
-echo
-echo "Manual rollback:"
-echo "  docker stop $CONTAINER_NAME"
-echo "  docker rm $CONTAINER_NAME"
-echo "  docker rename $BACKUP_NAME $CONTAINER_NAME"
-echo "  docker start $CONTAINER_NAME"
+progress_finish
+say "Update complete."
