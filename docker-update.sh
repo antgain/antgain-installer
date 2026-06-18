@@ -8,7 +8,7 @@ if [ -z "$CONTAINER_NAME" ]; then
   echo "  curl -fsSL <script_url> | bash -s -- <container_name>"
   echo
   echo "Example:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/antgain/antgain-installer/refs/heads/main/docker-update.sh | bash -s -- antgain-node"
+  echo "  curl -fsSL https://install.antgain.app/docker-update.sh | bash -s -- antgain-node"
   exit 1
 fi
 
