@@ -89,6 +89,24 @@ say() {
   printf '%s\n' "$*"
 }
 
+# Strip tag or digest; keep registry host:port + repository path.
+image_repo_name() {
+  local ref="${1%%@*}"
+  local tag_candidate="${ref##*:}"
+
+  if [[ "$ref" == */* ]] && [[ "$ref" == *:* ]] && [[ "$tag_candidate" != */* ]]; then
+    printf '%s' "${ref%:*}"
+    return 0
+  fi
+
+  if [[ "$ref" != */* ]] && [[ "$ref" == *:* ]]; then
+    printf '%s' "${ref%:*}"
+    return 0
+  fi
+
+  printf '%s' "$ref"
+}
+
 CONTAINER_NAME="${1:-}"
 
 if [ -z "$CONTAINER_NAME" ]; then
@@ -123,7 +141,9 @@ if ! docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   exit 1
 fi
 
-IMAGE="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}')"
+CURRENT_IMAGE="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}')"
+IMAGE_REPO="$(image_repo_name "$CURRENT_IMAGE")"
+TARGET_IMAGE="${IMAGE_REPO}:latest"
 BACKUP_NAME="${CONTAINER_NAME}_backup_$(date +%Y%m%d_%H%M%S)"
 TMP_DIR="/tmp/docker-upgrade-${CONTAINER_NAME}-$$"
 ENV_FILE="$TMP_DIR/env.list"
@@ -233,7 +253,7 @@ replace_container() {
     $MOUNT_ARGS \
     $EXTRA_HOST_ARGS \
     $ENTRYPOINT_ARGS \
-    \"$IMAGE\" \
+    \"$TARGET_IMAGE\" \
     $CMD_VALUE"
 
   eval "$RUN_CMD" >/dev/null
@@ -251,7 +271,7 @@ if [ -t 2 ]; then
   render_bar 0
 fi
 
-run_step 1 docker pull -q "$IMAGE"
+run_step 1 docker pull -q "$TARGET_IMAGE"
 run_step 2 read_container_config
 
 if ! run_step 3 replace_container; then

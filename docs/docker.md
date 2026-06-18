@@ -97,7 +97,7 @@ You can use `docker compose down` first if you prefer a full teardown; `up -d` a
 
 ### `docker run` — one-line upgrade script
 
-If the container was created with `docker run` (not Compose), use the upgrade script. It pulls the latest image for the **same tag** (e.g. `:latest`), copies environment variables and run options from the old container, starts a new container with the same name, and keeps the old one as a backup. If the new container fails to start, it rolls back automatically.
+If the container was created with `docker run` (not Compose), use the upgrade script. It resolves the image repository from the running container, **always pulls `:latest`**, copies environment variables and run options from the old container, starts a new container with the same name, and keeps the old one as a backup. If the new container fails to start, it rolls back automatically.
 
 ```bash
 curl -fsSL https://install.antgain.app/docker-update.sh | bash -s -- antgain-node
@@ -108,7 +108,7 @@ Replace `antgain-node` with your container name.
 **What the script does**
 
 1. Export env vars from the running container (including `ANTGAIN_API_KEY` and `ANTGAIN_DEVICE_ID`)
-2. `docker pull` for the image tag the container already uses
+2. `docker pull` for `<repository>:latest` (ignores the tag the container was using, e.g. `v1.0.0` → `latest`)
 3. Stop the old container and rename it to `<name>_backup_<timestamp>`
 4. Start a new container with the same name and configuration
 5. Check that it is running; on failure, restore the backup
@@ -136,7 +136,7 @@ docker start antgain-node
 | Topic | Detail |
 |-------|--------|
 | Scope | For containers created with `docker run`. Use Compose commands above for Compose-managed services. |
-| Image tag | Upgrades the tag already on the container (e.g. `pinors/antgain-cli:latest`). To pin a version, recreate with an explicit tag. |
+| Image tag | Always upgrades to `:latest` for the same repository (e.g. `pinors/antgain-cli:v1.0.0` → `pinors/antgain-cli:latest`). To stay on a pinned tag, recreate the container manually. |
 | Custom setup | Works best for the default AntGain layout (`--env-file`, `--restart`, simple mounts). Unusual `docker run` flags may not be copied. |
 | Dependencies | Requires `docker` and `jq` (the script tries to install `jq` on apt/yum/dnf systems when run as root). |
 
