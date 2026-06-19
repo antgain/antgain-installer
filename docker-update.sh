@@ -285,5 +285,7 @@ if ! run_step 4 verify_container; then
   exit 1
 fi
 
+docker rm "$BACKUP_NAME" >/dev/null
+
 progress_finish
 say "Update complete."

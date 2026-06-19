@@ -97,7 +97,7 @@ You can use `docker compose down` first if you prefer a full teardown; `up -d` a
 
 ### `docker run` — one-line upgrade script
 
-If the container was created with `docker run` (not Compose), use the upgrade script. It resolves the image repository from the running container, **always pulls `:latest`**, copies environment variables and run options from the old container, starts a new container with the same name, and keeps the old one as a backup. If the new container fails to start, it rolls back automatically.
+If the container was created with `docker run` (not Compose), use the upgrade script. It resolves the image repository from the running container, **always pulls `:latest`**, copies environment variables and run options from the old container, starts a new container with the same name, and removes the old container after a successful upgrade. If the new container fails to start, it rolls back automatically.
 
 ```bash
 curl -fsSL https://install.antgain.app/docker-update.sh | bash -s -- antgain-node
@@ -111,24 +111,14 @@ Replace `antgain-node` with your container name.
 2. `docker pull` for `<repository>:latest` (ignores the tag the container was using, e.g. `v1.0.0` → `latest`)
 3. Stop the old container and rename it to `<name>_backup_<timestamp>`
 4. Start a new container with the same name and configuration
-5. Check that it is running; on failure, restore the backup
+5. Check that it is running; on success, delete the old container; on failure, restore the backup
 
 **After a successful upgrade**
 
-Confirm the node is healthy, then remove the backup container:
+Confirm the node is healthy:
 
 ```bash
 docker exec -it antgain-node antgain status
-docker rm antgain-node_backup_YYYYMMDD_HHMMSS
-```
-
-**Manual rollback** (if you need to revert after confirming the upgrade):
-
-```bash
-docker stop antgain-node
-docker rm antgain-node
-docker rename antgain-node_backup_YYYYMMDD_HHMMSS antgain-node
-docker start antgain-node
 ```
 
 **Notes**
@@ -194,7 +184,7 @@ CLI command reference: [commands.md](commands.md).
 
 **Missing `ANTGAIN_DEVICE_ID`** — Docker nodes must set it; the process will not start without a valid UUID.
 
-**Upgrade script failed or rolled back** — Check `docker logs antgain-node`. The backup container (`<name>_backup_<timestamp>`) is still on the host; use the manual rollback steps in [Recreate or upgrade](#recreate-or-upgrade-same-node) if needed.
+**Upgrade script failed or rolled back** — Check `docker logs antgain-node`. On failure the script restores the original container automatically.
 
 ---
 
