@@ -39,21 +39,21 @@ If the installer set `ANTGAIN_SKIP_START` or `ANTGAIN_AUTO_START=false`, bare `a
 
 ---
 
-## `antgain run`
+## `antgain run` (or `antgain start`)
 
-Start the node.
+Start the node. `antgain start` is a built-in alias for `antgain run`.
 
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--daemon` | `-d` | Run in the background (detached from this terminal) |
-| `--server <HOST:PORT>` | — | Use a specific QUIC server address instead of the one from the API (rare; leave unset in normal use) |
 
 Examples:
 
 ```bash
-antgain run
-antgain run --daemon
-antgain run --api-key YOUR_KEY -d
+antgain start
+antgain start --daemon
+antgain start --api-key YOUR_KEY -d
+antgain run -d
 ```
 
 ---
@@ -98,7 +98,7 @@ antgain status --format json
 
 ## `antgain info`
 
-Shows local node information: CLI version, device id, whether credentials are saved, config path, and related details.
+Shows the installed version, device ID, and local configuration information.
 
 ```bash
 antgain info
@@ -125,7 +125,7 @@ antgain logs -f
 antgain logs --file /var/lib/antgain/logs/antgain.log
 ```
 
-On Linux with a **systemd** service, if no log file is found, the command may use `journalctl -u antgain` instead.
+For systemd service output, run `sudo journalctl -u antgain -n 50 --no-pager`.
 
 **Docker:**
 
@@ -144,6 +144,17 @@ Default log file locations:
 
 ---
 
+## `antgain check` (or `antgain doctor`)
+
+Checks your local configuration, saved credentials, network connection, node process, and log files.
+
+```bash
+antgain check
+antgain doctor
+```
+
+---
+
 ## `antgain update`
 
 Downloads a newer CLI from the release channel when available, replaces the binary, and restarts the node if it was running.
@@ -151,6 +162,18 @@ Downloads a newer CLI from the release channel when available, replaces the bina
 ```bash
 antgain update
 ```
+
+---
+
+## `antgain configure`
+
+Save an API key without starting the node. The client preserves the existing device identity and stores the key in its configuration format.
+
+```bash
+ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE' antgain configure
+```
+
+This command is available in the updated CLI. It saves the key locally; use `antgain check` to verify the account and connection.
 
 ---
 
@@ -164,18 +187,52 @@ antgain logout
 
 ---
 
+## `antgain uninstall`
+
+Removes the CLI and supported background service registrations. For installations created by the one-line installer, use the uninstall command in the [Linux](linux.md), [macOS](macos.md), or [Windows](windows.md) guide so its helper files are removed too. Saved data is deleted only when requested.
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--purge` | `-p` | Purge data, credentials, and log directories (`~/.antgain`) |
+| `--yes` | `-y` | Automatic confirmation without prompt |
+
+```bash
+antgain uninstall
+antgain uninstall --purge -y
+```
+
+---
+
+## `antgain health`
+
+Checks whether the node is running and connected. Exit code `0` means healthy; `1` means the node is unavailable or its connection needs attention. Docker uses this command for health checks.
+
+```bash
+antgain health
+```
+
+Output:
+- `healthy` (exit code 0)
+- `unhealthy: <reason>` (exit code 1)
+
+---
+
 ## Quick reference
 
 | Command | Purpose |
 |---------|---------|
 | `antgain` | Start node (foreground) |
-| `antgain run [-d]` | Start node; `-d` = background |
+| `antgain start [-d]` | Start node (alias of `run`); `-d` = background |
+| `antgain check` | Run diagnostics & health check (alias `doctor`) |
 | `antgain stop` | Stop node |
 | `antgain restart` | Restart node |
 | `antgain status [--format json]` | Status and earnings |
 | `antgain info` | Local configuration |
 | `antgain logs [-n N] [-f]` | View audit log |
+| `antgain health` | Health check for Docker (exits 0 if healthy, 1 if unhealthy) |
 | `antgain update` | Upgrade CLI |
+| `antgain uninstall` | Uninstall CLI & remove services |
+| `antgain configure` | Save an API key without starting |
 | `antgain logout` | Clear saved API key |
 
 ---

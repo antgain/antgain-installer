@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # AntGain CLI installer
-#   curl -fsSL https://install.antgain.app/install-cli.sh | bash
-#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.1.0
-#   curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- YOUR_API_KEY
-#   VERSION=1.1.0 curl -fsSL https://install.antgain.app/install-cli.sh | bash
+#   curl --connect-timeout 15 --max-time 60 -fsSL https://install.antgain.app/install-cli.sh | bash
+#   curl --connect-timeout 15 --max-time 60 -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.1.4
+#   curl --connect-timeout 15 --max-time 60 -fsSL https://install.antgain.app/install-cli.sh | bash -s -- YOUR_API_KEY
+#   curl --connect-timeout 15 --max-time 60 -fsSL https://install.antgain.app/install-cli.sh | VERSION=1.1.4 bash
 # See README.md: command syntax, version pinning, macOS quarantine, publishing releases.
 #
 # Env: VERSION, ANTGAIN_API_KEY, ANTGAIN_AUTO_START=true, ANTGAIN_SKIP_START=1
@@ -17,7 +17,7 @@ if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/lib/common.sh" ];
   . "${_ag_installer_root}/lib/common.sh"
 else
   _ag_common_tmp="$(mktemp)"
-  if ! curl -fsSL "${ANTGAIN_INSTALL_BASE:-https://install.antgain.app}/lib/common.sh" -o "$_ag_common_tmp"; then
+  if ! curl --connect-timeout 15 --max-time 60 -fsSL "${ANTGAIN_INSTALL_BASE:-https://install.antgain.app}/lib/common.sh" -o "$_ag_common_tmp"; then
     echo "Failed to load installer library" >&2
     exit 1
   fi
@@ -39,75 +39,69 @@ ag_log "System: ${OS_TYPE}/${ARCH_TYPE} (${PLATFORM_KEY})"
 
 ag_install_cli_binary "$PLATFORM_KEY" "${TARGET_VERSION:-}" "$ANTGAIN_INSTALL_DIR"
 
-if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ]; then
-  export PATH="${ANTGAIN_INSTALL_DIR}:${PATH:-}"
-  if [ -n "${ANTGAIN_API_KEY:-}" ]; then
-    ag_save_user_api_key "$ANTGAIN_API_KEY" 2>/dev/null || true
-  fi
-fi
-
-_verify_ok=true
-if ! ag_verify_cli_binary; then
-  _verify_ok=false
-  ag_print_warning "Binary verification failed (see above); will still try service setup if API key was provided"
-fi
-
-if [ "$_verify_ok" = true ]; then
-  ag_log ""
-  ag_print_success "AntGain CLI installed successfully"
-fi
+ag_verify_cli_binary || exit 1
+ag_print_success "AntGain CLI binary installed"
 
 _run_service_install() {
-  export ANTGAIN_SKIP_CONFIRM=1
+  local service_script temporary="" credential_file rc=0
   if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/install-cli-service.sh" ]; then
-    if [ "$EUID" -eq 0 ]; then
-      bash "${_ag_installer_root}/install-cli-service.sh" "$ANTGAIN_API_KEY"
-    else
-      sudo env ANTGAIN_INSTALLER_DIR="$_ag_installer_root" ANTGAIN_SKIP_CONFIRM=1 \
-        bash "${_ag_installer_root}/install-cli-service.sh" "$ANTGAIN_API_KEY"
-    fi
+    service_script="${_ag_installer_root}/install-cli-service.sh"
   else
-    if [ "$EUID" -eq 0 ]; then
-      curl -fsSL "${ANTGAIN_INSTALL_BASE}/install-cli-service.sh" | bash -s -- "$ANTGAIN_API_KEY"
-    else
-      curl -fsSL "${ANTGAIN_INSTALL_BASE}/install-cli-service.sh" | sudo env ANTGAIN_SKIP_CONFIRM=1 bash -s -- "$ANTGAIN_API_KEY"
+    temporary="$(mktemp)"
+    if ! curl --connect-timeout 15 --max-time 60 -fsSL "${ANTGAIN_INSTALL_BASE}/install-cli-service.sh" -o "$temporary"; then
+      rm -f "$temporary"
+      return 1
     fi
+    service_script="$temporary"
   fi
+  credential_file="$(mktemp)"
+  chmod 600 "$credential_file"
+  printf '%s' "$ANTGAIN_API_KEY" >"$credential_file"
+  trap 'rm -f "$credential_file" ${temporary:+"$temporary"}; exit 130' INT
+  trap 'rm -f "$credential_file" ${temporary:+"$temporary"}; exit 143' TERM
+  ag_run_root env \
+    ANTGAIN_API_KEY_FILE="$credential_file" \
+    ANTGAIN_INSTALLER_DIR="$_ag_installer_root" ANTGAIN_SKIP_CONFIRM=1 \
+    ANTGAIN_INSTALL_BASE="$ANTGAIN_INSTALL_BASE" ANTGAIN_R2_BASE_URL="$ANTGAIN_R2_BASE_URL" \
+    ANTGAIN_INSTALL_DIR="$ANTGAIN_INSTALL_DIR" ANTGAIN_DATA_DIR="$ANTGAIN_DATA_DIR" \
+    ANTGAIN_SERVICE_INSTALL_DIR="${ANTGAIN_SERVICE_INSTALL_DIR:-/usr/local/lib/antgain}" \
+    ANTGAIN_LINUX_START_SCRIPT="$ANTGAIN_LINUX_START_SCRIPT" ANTGAIN_LINUX_ENV_FILE="$ANTGAIN_LINUX_ENV_FILE" \
+    ANTGAIN_DEVICE_ID="${ANTGAIN_DEVICE_ID:-}" ANTGAIN_SERVICE_NAME="$ANTGAIN_SERVICE_NAME" \
+    ANTGAIN_AUTO_START="$ANTGAIN_AUTO_START" ANTGAIN_NO_BOOT="${ANTGAIN_NO_BOOT:-}" \
+    LOG_LEVEL="${LOG_LEVEL:-info}" \
+    bash "$service_script" || rc=$?
+  rm -f "$credential_file" ${temporary:+"$temporary"}
+  trap - INT TERM
+  return "$rc"
 }
 
 if [ -n "${ANTGAIN_API_KEY:-}" ] && ag_should_install_service; then
   ag_log ""
   if [ "${ANTGAIN_USER_INSTALL:-}" = "1" ] || ! ag_can_elevate; then
-    ag_finalize_user_install "$ANTGAIN_API_KEY" || ag_print_linux_manual_start_hints
-  elif ag_should_start_service; then
-    ag_print_info "API key provided — installing service (boot start + run now)..."
-    if ! _run_service_install; then
-      ag_print_warning "Background service setup did not complete; CLI binary is installed."
-      ag_print_linux_manual_start_hints
-    else
-      ag_print_service_status
-    fi
+    ag_finalize_user_install "$ANTGAIN_API_KEY" || { ag_print_linux_manual_start_hints; exit 1; }
   else
-    ag_print_info "API key provided — installing service (boot start enabled, run now skipped)..."
+    ag_print_info "Installing background service..."
     if ! _run_service_install; then
-      ag_print_warning "Background service setup did not complete; CLI binary is installed."
+      ag_print_error "Service setup did not complete; CLI binary is installed"
       ag_print_linux_manual_start_hints
-    else
-      ag_print_service_status
+      exit 1
     fi
+    ag_print_service_status
   fi
 elif [ -n "${ANTGAIN_API_KEY:-}" ] && ! ag_should_install_service; then
-  ag_print_info "Skipped service install (ANTGAIN_SKIP_START). Run: curl -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY"
+  ag_save_user_api_key "$ANTGAIN_API_KEY" || exit 1
+  ag_print_info "Skipped service install (ANTGAIN_SKIP_START). Run: curl --connect-timeout 15 --max-time 60 -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY"
 else
+  if ag_should_install_service && ag_should_start_service; then
+    ag_start_service_if_installed
+  fi
   ag_log ""
   ag_log "Next steps:"
-  ag_log "  1. Run:  export ANTGAIN_API_KEY=your-key && antgain"
-  ag_log "  2. Service: curl -fsSL ${ANTGAIN_INSTALL_BASE}/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY"
-  ag_log "  3. Uninstall: curl -fsSL ${ANTGAIN_INSTALL_BASE}/uninstall-cli.sh | sudo bash"
+  ag_log "  1. Check health:  antgain check"
+  ag_log "  2. Start node:    antgain start -d"
+  ag_log "  3. Check status:  antgain status"
+  ag_log "  4. View logs:     antgain logs -f"
+  ag_log "  5. Uninstall:     curl -fsSL ${ANTGAIN_INSTALL_BASE}/uninstall-cli.sh | bash"
   ag_log ""
   ag_log "Get your API key: https://antgain.app/dashboard/settings"
-fi
-
-if [ "$_verify_ok" != true ]; then
-  exit 1
 fi

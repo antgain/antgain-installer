@@ -1,72 +1,63 @@
 # macOS
 
-Install and run the AntGain CLI on Intel or Apple Silicon Macs.
-
-**API key:** [antgain.app → Settings](https://antgain.app/dashboard/settings)
-
----
+Install the CLI on an Intel or Apple Silicon Mac.
 
 ## Install
 
+Sign in at [AntGain](https://antgain.app), open [Account Settings](https://antgain.app/dashboard/settings), and copy your **API Key**. Click **Generate API Key** if needed.
+
+Replace `PASTE_YOUR_API_KEY_HERE` and run:
+
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- YOUR_API_KEY
+curl -fsSL https://install.antgain.app/install-cli.sh | ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE' bash
 ```
 
-Pin version:
+The script downloads the latest release, verifies its SHA-256, and selects the correct build for your Mac. With administrator access it installs a LaunchDaemon and starts the node. Without administrator access it installs under `~/.local/bin` and starts a background process.
+
+For a specific release, use `VERSION=1.1.4` before `bash` in the command above. A device ID is generated on first start and preserved during updates and reinstalls.
+
+## Check and manage your node
+
+For a system service:
 
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.1.0 YOUR_API_KEY
-```
-
-Service only (if CLI is already installed):
-
-```bash
-curl -fsSL https://install.antgain.app/install-cli-service.sh | sudo bash -s -- YOUR_API_KEY
-```
-
----
-
-## After install
-
-```bash
-antgain status
+sudo /usr/local/sbin/antgain-service check
+sudo /usr/local/sbin/antgain-service status
+sudo launchctl print system/app.antgain.cli
+sudo launchctl kickstart -k system/app.antgain.cli
 antgain logs -f
 ```
 
-Credentials and device id are stored under `~/.antgain/`.
+System services save data under `/var/lib/antgain`. User installations save credentials and identity under `~/.antgain`. A user background process does not start automatically after reboot.
 
----
-
-## Background service
-
-With an API key, a **LaunchDaemon** starts the node on boot:
+To run manually:
 
 ```bash
-antgain logs -f
+export ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE'
+antgain run --daemon
+unset ANTGAIN_API_KEY
 ```
 
----
+Open [your dashboard](https://antgain.app/dashboard) to see your devices and earnings.
 
-## If macOS blocks the app
+## Update or uninstall
+
+For a user installation, run `antgain update`. For a system service:
 
 ```bash
-xattr -d com.apple.quarantine /usr/local/bin/antgain 2>/dev/null || true
-/usr/local/bin/antgain --version
+sudo env ANTGAIN_DATA_DIR=/var/lib/antgain antgain update
 ```
 
-Allow **antgain** in **System Settings → Privacy & Security** if asked.
-
----
-
-## Manual run
+Uninstall:
 
 ```bash
-export ANTGAIN_API_KEY=your-key
-antgain
+curl -fsSL https://install.antgain.app/uninstall-cli.sh | bash
 ```
 
-[CLI commands](commands.md) · [Uninstall](../README.md) (see Linux guide uninstall script with `sudo`)
+Saved data is preserved unless you choose to delete it.
 
----
+## If macOS blocks the program
 
-[← Back to index](../README.md) · [Docker](docker.md)
+Open **System Settings → Privacy & Security** and allow AntGain if prompted.
+
+[CLI commands](commands.md) · [Docker](docker.md) · [Back to index](../README.md)

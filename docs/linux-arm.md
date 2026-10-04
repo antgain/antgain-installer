@@ -1,59 +1,29 @@
 # Linux ARM
 
-For boards such as RK3528 / RK3576 and other ARM SBCs running Debian or Ubuntu.
-
-**API key:** [antgain.app → Settings](https://antgain.app/dashboard/settings)
-
----
-
-## Which build
-
-| System | Use |
-|--------|-----|
-| 64-bit (aarch64) | Same installer as [Linux x86_64](linux.md) |
-| 32-bit (armhf) | Same installer; the script picks `linux-armv7` |
-
----
+The CLI supports Linux ARM64 (`aarch64`) and ARMv7 (`armhf`) systems, including supported Debian and Ubuntu installations on ARM boards.
 
 ## Install
 
+Sign in at [AntGain](https://antgain.app), open [Account Settings](https://antgain.app/dashboard/settings), and copy your **API Key**. Click **Generate API Key** if needed.
+
+Replace `PASTE_YOUR_API_KEY_HERE` and run:
+
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- YOUR_API_KEY
+curl -fsSL https://install.antgain.app/install-cli.sh | ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE' bash
 ```
 
-```bash
-antgain status
-```
+The script selects the build for your system. The device ID is generated and saved automatically. Keep the saved data when updating or reinstalling.
 
-Identity is stored in `~/.antgain/config.json` after the first run.
-
----
-
-## No systemd
-
-On many ARM images there is no systemd. The installer may use SysV, OpenRC, or cron `@reboot` instead.
+For systems without systemd, the installer uses OpenRC, SysV, or a startup helper where available:
 
 ```bash
-sudo /usr/local/sbin/antgain-service start
 sudo /usr/local/sbin/antgain-service status
-antgain logs -f
+sudo /usr/local/sbin/antgain-service stop
+sudo /usr/local/sbin/antgain-service start
 ```
 
-Or:
+System services save data under `/var/lib/antgain`; user installations use `~/.antgain`.
 
-```bash
-export ANTGAIN_API_KEY=your-key
-antgain run --daemon
-```
+See [Linux](linux.md) for service management, updates, and uninstall instructions, or [Docker](docker.md) to run in a container.
 
-If you see “systemd is required”, the CLI is still installed — use the commands above.
-
----
-
-## CLI commands
-
-[commands.md](commands.md)
-
----
-
-[← Back to index](../README.md) · [Linux x86_64](linux.md) · [Docker](docker.md)
+[Back to index](../README.md)

@@ -2,35 +2,17 @@ services:
   antgain:
     image: pinors/antgain-cli:latest
     container_name: antgain
-    restart: always
+    restart: unless-stopped
+    stop_grace_period: 30s
     environment:
-      # Required: Your API Key (get from https://antgain.app/dashboard/settings)
       - ANTGAIN_API_KEY=${ANTGAIN_API_KEY}
-
-      # Optional: Log level (default: info)
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-
-      # Optional: API URL (default: https://api.antgain.app)
-      # - ANTGAIN_API_URL=https://api.antgain.app
-
-      # Optional: Node server address (auto-detected if not set)
-      # - NODE_SERVER=107.174.172.30:8443
+      # Optional. Omit to auto-generate a UUID on the data volume.
+      - ANTGAIN_DEVICE_ID=${ANTGAIN_DEVICE_ID:-}
     volumes:
-      - antgain-data:/data
+      - ${ANTGAIN_HOST_DATA_DIR:-${HOME}/.antgain}:/data/.antgain
     healthcheck:
-      test: ["CMD-SHELL", "antgain --version >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "antgain", "health"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 15s
-
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 3600 --cleanup antgain
-
-volumes:
-  antgain-data:
+      start_period: 120s

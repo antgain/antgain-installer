@@ -1,112 +1,105 @@
-# Linux (x86_64)
+# Linux
 
-Install the AntGain CLI on Ubuntu, Debian, and other 64-bit x86 Linux systems.
+Install the CLI on a Linux x64 computer, server, or VPS. For ARM devices, see [Linux ARM](linux-arm.md).
 
-**API key:** [antgain.app → Settings](https://antgain.app/dashboard/settings)
+## Get your API key
 
----
+Sign in at [AntGain](https://antgain.app), open [Account Settings](https://antgain.app/dashboard/settings), and copy your **API Key**. Click **Generate API Key** if you do not have one yet.
 
 ## Install
 
+Replace `PASTE_YOUR_API_KEY_HERE` and run:
+
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- YOUR_API_KEY
+curl -fsSL https://install.antgain.app/install-cli.sh | ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE' bash
 ```
 
-This installs `antgain` to `/usr/local/bin`, sets up **start on boot** when possible, and starts the node.
+The installer downloads the latest release and verifies its SHA-256. With administrator access it installs a background service and starts the node. Without administrator access it installs under `~/.local/bin` and uses a user service or background process. Open a new terminal if `antgain` is not yet on your PATH.
 
-Pin a version:
+A device ID is generated on first start. Reinstalling or updating keeps the saved identity.
+
+To download the CLI without installing a service:
 
 ```bash
-curl -fsSL https://install.antgain.app/install-cli.sh | bash -s -- 1.1.0 YOUR_API_KEY
+curl -fsSL https://install.antgain.app/install-cli.sh | ANTGAIN_SKIP_START=1 bash
 ```
 
-Use `bash -s --` before the version and API key.
-
----
-
-## Install options
-
-| Goal | How |
-|------|-----|
-| Latest release | `curl -fsSL https://install.antgain.app/install-cli.sh \| bash` |
-| API key + service | `bash -s -- YOUR_API_KEY` |
-| Binary only (no service) | `ANTGAIN_SKIP_START=1` with the install script |
-| Install service later | `curl -fsSL https://install.antgain.app/install-cli-service.sh \| sudo bash -s -- YOUR_API_KEY` |
-| Custom install path | `ANTGAIN_INSTALL_DIR=$HOME/.local/bin` |
-| No working `sudo` | Installs to `~/.local/bin`, updates shell PATH, saves API key, starts `antgain run --daemon` (and `@reboot` cron when possible) |
-
-| Variable | Effect |
-|----------|--------|
-| `VERSION=1.1.0` | Pin release (same as `bash -s -- 1.1.0`) |
-| `ANTGAIN_API_KEY=...` | Pass API key via environment |
-| `ANTGAIN_SKIP_START=1` | Do not install background service |
-| `ANTGAIN_AUTO_START=false` | Enable boot start but do not start until reboot |
-| `ANTGAIN_NO_BOOT=1` | Install service without enable on boot |
-
----
-
-## After install
+To install a specific release:
 
 ```bash
+curl -fsSL https://install.antgain.app/install-cli.sh | VERSION=1.1.4 ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE' bash
+```
+
+## Check your node
+
+```bash
+antgain check
 antgain status
 antgain logs -f
 ```
 
-Device identity is saved automatically in `~/.antgain/config.json`. You do not need to set `ANTGAIN_DEVICE_ID` on Linux unless you want a fixed id yourself.
+For a system service, use its saved settings when checking your account:
 
----
+```bash
+sudo /usr/local/sbin/antgain-service check
+sudo /usr/local/sbin/antgain-service status
+```
 
-## Service (systemd)
+Open [your dashboard](https://antgain.app/dashboard) to see devices and earnings.
 
-When you install with an API key, a **systemd** service is used if available:
+## Manage the background service
+
+On systems with systemd:
 
 ```bash
 sudo systemctl status antgain
 sudo systemctl restart antgain
-antgain logs -f
+sudo systemctl stop antgain
+sudo systemctl start antgain
 ```
 
-API key (root only): `/etc/antgain/env`
+For a user service, use `systemctl --user` instead. A user service normally starts after login. An administrator can enable startup before login with `sudo loginctl enable-linger "$USER"`.
 
----
-
-## Manual run
+On systems without systemd:
 
 ```bash
-export ANTGAIN_API_KEY=your-key
-antgain
-antgain run --daemon
+sudo /usr/local/sbin/antgain-service start
+sudo /usr/local/sbin/antgain-service stop
+sudo /usr/local/sbin/antgain-service status
 ```
 
-All commands: [commands.md](commands.md).
+System services save node data under `/var/lib/antgain`. Their program files are stored under `/usr/local/lib/antgain` so the node can apply updates. The `antgain` command remains available in `/usr/local/bin`.
 
----
+## Run manually
 
-## Upgrade and remove
+```bash
+export ANTGAIN_API_KEY='PASTE_YOUR_API_KEY_HERE'
+antgain run --daemon
+unset ANTGAIN_API_KEY
+```
+
+User installations save credentials and identity under `~/.antgain`. Do not delete this directory if you want to keep the same node.
+
+## Update or uninstall
+
+For a user installation:
 
 ```bash
 antgain update
 ```
 
-```bash
-curl -fsSL https://install.antgain.app/uninstall-cli.sh | sudo bash
-```
-
----
-
-## Related guides
-
-- [Linux ARM boards](linux-arm.md)  
-- [Docker](docker.md)  
-- [macOS](macos.md)  
-- [CLI commands](commands.md)
-
-Desktop app (graphical, Linux amd64 only):
+For a system service:
 
 ```bash
-curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
+sudo env ANTGAIN_DATA_DIR=/var/lib/antgain antgain update
 ```
 
----
+To uninstall either kind:
 
-[← Back to index](../README.md)
+```bash
+curl -fsSL https://install.antgain.app/uninstall-cli.sh | bash
+```
+
+The uninstaller requests administrator access if a system installation exists. Saved data is preserved unless you choose to delete it. Docker containers are removed separately using Docker commands.
+
+[CLI commands](commands.md) · [Docker](docker.md) · [Back to index](../README.md)

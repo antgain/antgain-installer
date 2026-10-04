@@ -3,7 +3,7 @@ set -euo pipefail
 
 # AntGain Desktop installer (Debian/Ubuntu x86_64 .deb)
 #   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash
-#   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.1.0
+#   curl -fsSL https://install.antgain.app/install-linux.sh | sudo bash -s 1.1.4
 
 _ag_installer_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [ -n "$_ag_installer_root" ] && [ -f "${_ag_installer_root}/lib/common.sh" ]; then
@@ -35,6 +35,8 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 
 TARGET_VERSION="${1:-${VERSION:-}}"
+# Legacy `bash -s VERSION` puts the version in $0.
+if [ -z "$TARGET_VERSION" ] && ag_is_version_string "$0"; then TARGET_VERSION="$0"; fi
 ag_fetch_desktop_deb_url "${TARGET_VERSION:-}" amd64
 
 ag_print_info "Version: ${DESKTOP_VERSION}"

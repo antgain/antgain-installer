@@ -1,197 +1,199 @@
-# Docker
+# AntGain Node for Docker
 
-Run AntGain in a container using the image [pinors/antgain-cli](https://hub.docker.com/r/pinors/antgain-cli) on Docker Hub.
+Share unused bandwidth with AntGain using Docker. Install and start Docker first, then follow the steps below in a Linux, macOS, or NAS terminal.
 
-**API key:** [antgain.app → Settings](https://antgain.app/dashboard/settings)
+## 1. Get your API key
 
----
+1. Sign up or sign in at [AntGain](https://antgain.app).
+2. Open [Account Settings](https://antgain.app/dashboard/settings) and find **API Key**.
+3. Copy your key. If you do not have one yet, click **Generate API Key** first.
 
-## Device UUID (`ANTGAIN_DEVICE_ID`)
+Keep your API key private.
 
-Each container is one node on the server. The platform binds that node to a **UUID** you choose.
-
-| Do | Don't |
-|----|--------|
-| Generate a UUID **once** and save it in `.env` or Compose | Put `ANTGAIN_DEVICE_ID=$(uuidgen ...)` in every `docker run` |
-| Reuse the **same** UUID when you recreate **this** container | Generate a new UUID on each restart |
-| Use a **different** UUID for each container running **at the same time** | Share one UUID between two running containers |
-
-Generate a UUID once:
+Create a folder for your Docker setup:
 
 ```bash
-uuidgen | tr '[:upper:]' '[:lower:]'
-# Example: f6fdbd41-4e2c-4a1b-9c3d-8e7f6a5b4c2d
+mkdir -p antgain-docker
+cd antgain-docker
 ```
 
-Write it in `.env` and keep that file. That value is the node’s identity on AntGain.
-
-**Required:** every container must have `ANTGAIN_API_KEY` and `ANTGAIN_DEVICE_ID` (standard UUID format).
-
-If the container already has `~/.antgain/config.json` with a saved id, **`ANTGAIN_DEVICE_ID` in the environment still wins**. Do not pass a new random UUID on restart — use the same value as the first time you created this node.
-
-Check device id:
+Replace `PASTE_YOUR_API_KEY_HERE` with your key, then run:
 
 ```bash
-docker exec -it antgain-node antgain info
+cat > antgain.env <<'EOF_KEY'
+ANTGAIN_API_KEY=PASTE_YOUR_API_KEY_HERE
+EOF_KEY
+chmod 600 antgain.env
 ```
 
----
-
-## Quick start
-
-Create `.env` (generate the UUID only when you create a **new** node):
-
-```bash
-ANTGAIN_API_KEY=your_api_key_here
-ANTGAIN_DEVICE_ID=f6fdbd41-4e2c-4a1b-9c3d-8e7f6a5b4c2d
-```
+## 2. Start AntGain
 
 ```bash
 docker run -d \
   --name antgain-node \
   --restart unless-stopped \
-  --env-file .env \
+  --stop-timeout 30 \
+  --health-cmd="antgain health || exit 1" \
+  --health-interval=30s \
+  --health-timeout=5s \
+  --health-start-period=120s \
+  --health-retries=3 \
+  --env-file ./antgain.env \
+  -v antgain-data:/data/.antgain \
   pinors/antgain-cli:latest
 ```
 
+Docker downloads the image if needed and starts AntGain in the background. Automatic updates are enabled by default; no update setting is needed.
+
+The device ID is generated automatically on first start and saved in `antgain-data`. Keep this volume when restarting, updating, or replacing the container.
+
+## 3. Check your node
+
 ```bash
+# View recent output
+docker logs --tail 100 antgain-node
+
+# Check the node connection
+docker exec antgain-node antgain health
+
+# View Docker health status: starting, healthy, or unhealthy
+docker inspect --format '{{.State.Health.Status}}' antgain-node
+```
+
+Allow up to two minutes for startup. AntGain checks its connection every 30 seconds after this startup period. After three consecutive failed checks, it exits so Docker's `unless-stopped` policy can restart the container. If this repeats, check your API key, internet connection, and logs. Open [your dashboard](https://antgain.app/dashboard) to see your devices, usage, and earnings.
+
+## Everyday commands
+
+```bash
+# Follow container output; Ctrl+C closes the log view
 docker logs -f antgain-node
-docker exec -it antgain-node antgain status
-docker exec -it antgain-node antgain logs -f
+
+# Stop sharing
+docker stop antgain-node
+
+# Start sharing again
+docker start antgain-node
+
+# Restart the container
+docker restart antgain-node
+
+# Show the installed client version
+docker exec antgain-node antgain --version
 ```
 
----
+### Update the Docker image
 
-## Docker Compose
-
-```yaml
-services:
-  antgain-node:
-    image: pinors/antgain-cli:latest
-    container_name: antgain-node
-    restart: unless-stopped
-    env_file: .env
-```
-
-```bash
-docker compose up -d
-docker compose logs -f
-```
-
----
-
-## Recreate or upgrade (same node)
-
-Keep the **same** `ANTGAIN_DEVICE_ID` for this node. Do not generate a new UUID on upgrade.
-
-### Docker Compose
-
-Pull the latest image for your tag, then recreate the service:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-You can use `docker compose down` first if you prefer a full teardown; `up -d` alone is enough when only the image changed.
-
-### `docker run` — one-line upgrade script
-
-If the container was created with `docker run` (not Compose), use the upgrade script. It resolves the image repository from the running container, **always pulls `:latest`**, copies environment variables and run options from the old container, starts a new container with the same name, and removes the old container after a successful upgrade. If the new container fails to start, it rolls back automatically.
-
-```bash
-curl -fsSL https://install.antgain.app/docker-update.sh | bash -s -- antgain-node
-```
-
-Replace `antgain-node` with your container name.
-
-**What the script does**
-
-1. Export env vars from the running container (including `ANTGAIN_API_KEY` and `ANTGAIN_DEVICE_ID`)
-2. `docker pull` for `<repository>:latest` (ignores the tag the container was using, e.g. `v1.0.0` → `latest`)
-3. Stop the old container and rename it to `<name>_backup_<timestamp>`
-4. Start a new container with the same name and configuration
-5. Check that it is running; on success, delete the old container; on failure, restore the backup
-
-**After a successful upgrade**
-
-Confirm the node is healthy:
-
-```bash
-docker exec -it antgain-node antgain status
-```
-
-**Notes**
-
-| Topic | Detail |
-|-------|--------|
-| Scope | For containers created with `docker run`. Use Compose commands above for Compose-managed services. |
-| Image tag | Always upgrades to `:latest` for the same repository (e.g. `pinors/antgain-cli:v1.0.0` → `pinors/antgain-cli:latest`). To stay on a pinned tag, recreate the container manually. |
-| Custom setup | Works best for the default AntGain layout (`--env-file`, `--restart`, simple mounts). Unusual `docker run` flags may not be copied. |
-| Dependencies | Requires `docker` and `jq` (the script tries to install `jq` on apt/yum/dnf systems when run as root). |
-
-### `docker run` — manual recreate
-
-Stop and remove the container, then start again with the **same** `.env` file:
+Automatic client updates run inside the container. To refresh the Docker image as well, run these commands from your `antgain-docker` folder:
 
 ```bash
 docker pull pinors/antgain-cli:latest
 docker stop antgain-node
 docker rm antgain-node
+
 docker run -d \
   --name antgain-node \
   --restart unless-stopped \
-  --env-file .env \
+  --stop-timeout 30 \
+  --health-cmd="antgain health || exit 1" \
+  --health-interval=30s \
+  --health-timeout=5s \
+  --health-start-period=120s \
+  --health-retries=3 \
+  --env-file ./antgain.env \
+  -v antgain-data:/data/.antgain \
   pinors/antgain-cli:latest
 ```
 
----
+The same data volume keeps your device ID. Do not delete `antgain-data`.
 
+## Optional: set your own device ID
 
-## Multiple nodes on one host
-
-Each service needs its own `ANTGAIN_DEVICE_ID` in `.env` or in the Compose file. Never run two containers with the same UUID at once.
-
----
-
-## Environment variables
+You normally do not need to do this. Only two environment variables are needed for this setup:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTGAIN_API_KEY` | Yes | Your API key |
-| `ANTGAIN_DEVICE_ID` | Yes | Fixed UUID for this container (see above) |
-| `ANTGAIN_AUTO_UPDATE_ON_RECONNECT` | No | Default on; set to `0` to disable in-container update check on reconnect |
-| `ANTGAIN_SKIP_UPDATE_ON_RECONNECT` | No | Set to `1` to disable reconnect updates |
+| `ANTGAIN_API_KEY` | Yes | Copy it from Account Settings. |
+| `ANTGAIN_DEVICE_ID` | No | A UUID for this node. Leave it unset to generate and save one automatically. |
 
----
+If you want to specify an ID **before starting a new node**, generate a UUID:
 
-## Logs
+```bash
+docker run --rm --entrypoint cat pinors/antgain-cli:latest \
+  /proc/sys/kernel/random/uuid
+```
 
-| What | Command |
-|------|---------|
-| Container output | `docker logs -f antgain-node` |
-| Audit log inside container | `docker exec -it antgain-node antgain logs -f` |
+Replace `PASTE_UUID_HERE` with the UUID printed by that command, then add it to `antgain.env`:
 
-CLI command reference: [commands.md](commands.md).
+```bash
+printf 'ANTGAIN_DEVICE_ID=%s\n' 'PASTE_UUID_HERE' >> antgain.env
+```
 
----
+Generate it once and keep it unchanged for that node. Each additional node needs its own container name, data volume, and device ID.
 
-## Troubleshooting
+If you change `antgain.env`, recreate the container using the commands in **Update the Docker image** so it reads the new settings.
 
-**Cannot connect after recreate** — you changed `ANTGAIN_DEVICE_ID`. Use the original UUID from your `.env`.
+## Optional: Docker Compose
 
-**Two containers conflict** — duplicate `ANTGAIN_DEVICE_ID`. Give each container its own UUID.
+Use Compose **instead of** the `docker run` setup. In your `antgain-docker` folder, keep the same `antgain.env` and create `compose.yaml`:
 
-**Missing `ANTGAIN_DEVICE_ID`** — Docker nodes must set it; the process will not start without a valid UUID.
+```bash
+cat > compose.yaml <<'EOF_COMPOSE'
+services:
+  antgain-node:
+    image: pinors/antgain-cli:latest
+    container_name: antgain-node
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "antgain health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    env_file:
+      - ./antgain.env
+    volumes:
+      - antgain-data:/data/.antgain
 
-**Upgrade script failed or rolled back** — Check `docker logs antgain-node`. On failure the script restores the original container automatically.
+volumes:
+  antgain-data:
+    name: antgain-data
+EOF_COMPOSE
+```
 
----
+If you already started `antgain-node` with `docker run`, remove that container first. Its data volume is kept:
 
-## Linux or macOS install
+```bash
+docker stop antgain-node
+docker rm antgain-node
+```
 
-Use the host installer instead of Docker: [linux.md](linux.md) · [macos.md](macos.md)
+Then start with Compose:
 
----
+```bash
+docker compose up -d
+```
 
-[← Back to index](../README.md)
+Run these commands from the same folder:
+
+```bash
+# View output
+docker compose logs -f antgain-node
+
+# Stop / start / restart
+docker compose stop
+docker compose start
+docker compose restart
+
+# Update the image and recreate the container
+docker compose pull
+docker compose up -d --force-recreate
+```
+
+Keep the data volume. Do not use `docker compose down -v` unless you intend to delete this node's saved data.
+
+## Need help?
+
+If the node cannot connect, check your internet connection and API key, then read `docker logs --tail 100 antgain-node`. After correcting the key in `antgain.env`, recreate the container to apply it.
+
+Visit the [Help Center](https://antgain.app/help) or [contact support](https://antgain.app/contact). Remove API keys and personal information from screenshots or logs before sharing them.
